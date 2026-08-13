@@ -68,13 +68,23 @@ export const sessionMiddleware = (): MiddlewareHandler<AppContext> => {
     // The token is bound to the session scope. If the cookie holds a token that
     // is still valid for this scope we keep it (so parallel tabs agree);
     // otherwise we mint a fresh one and set the cookie.
+    //
+    // Without a configured SESSION_SECRET we cannot sign tokens: WebCrypto
+    // rejects a zero-length HMAC key, which would otherwise turn an empty key
+    // into a 500 on every request (including /health). Degrade gracefully
+    // instead — anonymous browsing keeps working and a missing secret surfaces
+    // as a clear 403 on mutating requests, not a cryptic INTERNAL_ERROR.
     const existing = getCookie(c.req.raw, CSRF_COOKIE);
     const secret = c.env.SESSION_SECRET ?? '';
-    let csrfToken = existing;
+    let csrfToken: string | null = null;
 
-    if (!csrfToken || !(await verifyCsrfToken(secret, scope, csrfToken))) {
-      csrfToken = await issueCsrfToken(secret, scope);
-      c.header('set-cookie', csrfCookie(csrfToken, CSRF_TTL, secure), { append: true });
+    if (secret) {
+      if (existing && (await verifyCsrfToken(secret, scope, existing))) {
+        csrfToken = existing;
+      } else {
+        csrfToken = await issueCsrfToken(secret, scope);
+        c.header('set-cookie', csrfCookie(csrfToken, CSRF_TTL, secure), { append: true });
+      }
     }
     c.set('csrfToken', csrfToken);
 

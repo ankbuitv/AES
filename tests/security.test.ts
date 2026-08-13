@@ -247,4 +247,23 @@ describe('health endpoint', () => {
     expect(body.status).toBe('ok');
     expect(body.checks.database).toBe('ok');
   });
+
+  it('does not 500 when SESSION_SECRET is not configured', async () => {
+    // Regression: an empty/missing SESSION_SECRET used to throw a WebCrypto
+    // DataError (zero-length HMAC key) inside issueCsrfToken in the session
+    // middleware, turning every request — including /health — into a 500.
+    // It must degrade gracefully to a 200 health probe.
+    const { bindings } = createTestEnv({
+      SESSION_SECRET: '',
+      IP_HASH_SALT: '',
+    });
+    const response = await worker.fetch(
+      new Request('http://localhost:8787/health'),
+      bindings,
+      ctx(),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { status: string; checks: Record<string, string> };
+    expect(body.status).toBe('ok');
+  });
 });
