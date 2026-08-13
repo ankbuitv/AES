@@ -141,6 +141,8 @@ export function statusTitle(status: number): string {
       return 'Slow down';
     case 503:
       return 'Temporarily unavailable';
+    case 502:
+      return 'Something went wrong';
     default:
       return 'Something went wrong';
   }

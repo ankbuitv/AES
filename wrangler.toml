@@ -1,6 +1,6 @@
 #:schema node_modules/wrangler/config-schema.json
 # ---------------------------------------------------------------------------
-# AnkSocial — Cloudflare Worker configuration
+# AES — Cloudflare Worker configuration
 # This file contains NON-SECRET configuration only.
 # Secrets (B2 keys, SESSION_SECRET, ...) are set with `wrangler secret put`.
 #
@@ -29,9 +29,9 @@ enabled = true
 # --- Production runtime configuration --------------------------------------
 [vars]
 ENVIRONMENT = "production"
-SITE_NAME = "AnkSocial"
-SITE_URL = "https://ankb.qzz.io"
-SITE_DESCRIPTION = "A modern, community-first mini social platform."
+SITE_NAME = "AES"
+SITE_URL = "https://me.ankb.qzz.io"
+SITE_DESCRIPTION = "AES — Ank Ecosystem Social"
 STORAGE_PROVIDER = "b2"            # b2 | s3 | r2
 MAX_UPLOAD_BYTES = "10485760"      # 10 MiB per file
 MAX_JSON_BODY_BYTES = "262144"     # 256 KiB
@@ -95,9 +95,9 @@ not_found_handling = "none"
 
 [env.local.vars]
 ENVIRONMENT = "development"
-SITE_NAME = "AnkSocial"
+SITE_NAME = "AES"
 SITE_URL = "http://localhost:8787"
-SITE_DESCRIPTION = "A modern, community-first mini social platform."
+SITE_DESCRIPTION = "AES — Ank Ecosystem Social"
 STORAGE_PROVIDER = "r2"
 MAX_UPLOAD_BYTES = "10485760"
 MAX_JSON_BODY_BYTES = "262144"
@@ -133,9 +133,9 @@ not_found_handling = "none"
 
 [env.preview.vars]
 ENVIRONMENT = "preview"
-SITE_NAME = "AnkSocial (preview)"
+SITE_NAME = "AES (preview)"
 SITE_URL = "https://anksocial-preview.workers.dev"
-SITE_DESCRIPTION = "A modern, community-first mini social platform."
+SITE_DESCRIPTION = "AES — Ank Ecosystem Social"
 STORAGE_PROVIDER = "b2"
 MAX_UPLOAD_BYTES = "10485760"
 MAX_JSON_BODY_BYTES = "262144"

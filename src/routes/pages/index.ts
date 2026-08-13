@@ -136,7 +136,7 @@ for (const feed of FEEDS) {
         cursor: cursorOf(c),
         limit: limitOf(c),
       }),
-      categoryOptions(c),
+      categoryOptions(c).catch(() => [] as { slug: string; name: string }[]),
       defaultRail(c),
     ]);
 
@@ -317,7 +317,7 @@ pages.get('/post/:slug', readLimit(), async (c) => {
     defaultRail(c),
   ]);
 
-  const description = post.excerpt || toPlainText(post.title, 160) || 'A post on AnkSocial';
+  const description = post.excerpt || toPlainText(post.title, 160) || `A post on ${getConfig(c.env).siteName}`;
   const heroImage = post.media[0]
     ? absoluteUrl(c, `/media/${post.media[0].id}?v=medium`)
     : undefined;
@@ -415,7 +415,7 @@ async function profileHandler(c: Context<AppContext>, tab: ProfileTab) {
   return renderPage(c, {
     meta: {
       title,
-      description: profile.bio || `${profile.displayName || profile.username} on AnkSocial.`,
+      description: profile.bio || `${profile.displayName || profile.username} on ${getConfig(c.env).siteName}.`,
       canonical: absoluteUrl(c, path),
       ogType: 'profile',
       ...(profile.avatarMediaId

@@ -31,7 +31,7 @@ const people = [
     displayName: 'Ank',
     email: 'ank@example.com',
     role: 'admin',
-    bio: 'Building AnkSocial on Cloudflare Workers. Coffee, code, and long changelogs.',
+    bio: 'Building AES on Cloudflare Workers. Coffee, code, and long changelogs.',
     location: 'Bien Hoa, VN',
     website: 'https://example.com',
   },
@@ -89,7 +89,7 @@ const posts = [
     author: 'ank',
     category: 'general',
     contentType: 'markdown',
-    title: 'Welcome to AnkSocial',
+    title: 'Welcome to AES',
     content: `This is a small community platform that runs entirely at the edge — no origin server, no VPS, no PHP.
 
 **What is here already**

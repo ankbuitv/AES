@@ -7,7 +7,7 @@
  * production.
  */
 
-import { createTestDatabase, FakeD1, FakeKV } from './d1';
+import { createEmptyDatabase, createTestDatabase, FakeD1, FakeKV } from './d1';
 import type { Bindings } from '../../src/types/env';
 import type {
   GetObjectResult,
@@ -85,8 +85,11 @@ export interface TestEnv {
   storage: MemoryStorage;
 }
 
-export function createTestEnv(overrides: Partial<Bindings> = {}): TestEnv {
-  const db = createTestDatabase();
+export function createTestEnv(
+  overrides: Partial<Bindings> = {},
+  options: { empty?: boolean } = {},
+): TestEnv {
+  const db = options.empty ? createEmptyDatabase() : createTestDatabase();
   const kv = new FakeKV();
   const storage = new MemoryStorage();
 
@@ -94,7 +97,7 @@ export function createTestEnv(overrides: Partial<Bindings> = {}): TestEnv {
     DB: db as unknown as D1Database,
     KV: kv as unknown as KVNamespace,
     ENVIRONMENT: 'development',
-    SITE_NAME: 'AnkSocial Test',
+    SITE_NAME: 'AES Test',
     SITE_URL: 'http://localhost:8787',
     SITE_DESCRIPTION: 'Test instance',
     STORAGE_PROVIDER: 'r2',

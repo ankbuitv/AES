@@ -25,11 +25,13 @@ interface Bootstrap {
 
 declare global {
   interface Window {
+    __AES__?: Bootstrap;
     __ANK__?: Bootstrap;
   }
 }
 
-const boot: Bootstrap = window.__ANK__ ?? { user: null, csrfToken: null, origin: location.origin };
+const boot: Bootstrap =
+  window.__AES__ ?? window.__ANK__ ?? { user: null, csrfToken: null, origin: location.origin };
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -140,8 +142,8 @@ function applyTheme(theme: Theme): void {
   document.cookie = `ank_theme=${theme}; path=/; max-age=31536000; samesite=lax${
     location.protocol === 'https:' ? '; secure' : ''
   }`;
-  const icon = $('[data-theme-icon]');
-  if (icon) icon.textContent = dark ? '☾' : '☀';
+  document.documentElement.classList.toggle('theme-dark', dark);
+  document.documentElement.classList.toggle('theme-light', !dark);
   for (const button of $$<HTMLButtonElement>('[data-theme-set]')) {
     const pressed = button.dataset.themeSet === theme;
     button.setAttribute('aria-pressed', pressed ? 'true' : 'false');
@@ -700,6 +702,13 @@ function initDelegatedClicks(): void {
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement | null;
     if (!target) return;
+
+    const retry = target.closest('[data-retry]');
+    if (retry) {
+      event.preventDefault();
+      location.reload();
+      return;
+    }
 
     const matchers: [string, (el: HTMLElement) => void | Promise<void>][] = [
       ['[data-reaction]', handleReaction],

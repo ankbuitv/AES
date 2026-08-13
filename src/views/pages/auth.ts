@@ -29,8 +29,9 @@ function alerts(input: AuthPageInput): string {
 export function renderLoginPage(input: AuthPageInput): string {
   return html`
     <section class="authcard" aria-labelledby="auth-title">
+      <img class="authcard__logo" src="/logo-mark.svg" width="40" height="40" alt="">
       <h1 class="authcard__title" id="auth-title">Welcome back</h1>
-      <p class="muted">Sign in to post, comment and follow.</p>
+      <p class="muted">Sign in to ${input.siteName ?? 'AES'} to post, comment and follow.</p>
       ${raw(alerts(input))}
 
       <form class="form" method="post" action="/api/auth/login" data-auth-form data-redirect="${input.next ?? '/'}">
@@ -79,7 +80,8 @@ export function renderRegisterPage(input: AuthPageInput): string {
 
   return html`
     <section class="authcard" aria-labelledby="auth-title">
-      <h1 class="authcard__title" id="auth-title">Create your account</h1>
+      <img class="authcard__logo" src="/logo-mark.svg" width="40" height="40" alt="">
+      <h1 class="authcard__title" id="auth-title">Join AES</h1>
       <p class="muted">Pick a handle. You can change your display name later.</p>
       ${raw(alerts(input))}
 

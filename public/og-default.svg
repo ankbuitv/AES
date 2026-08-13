@@ -1,19 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="AnkSocial">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="AES — Ank Ecosystem Social">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0b0f19"/>
-      <stop offset="1" stop-color="#1e2440"/>
+    <linearGradient id="og-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/>
+      <stop offset="1" stop-color="#161B33"/>
     </linearGradient>
-    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#8b87ff"/>
-      <stop offset="1" stop-color="#c4b5fd"/>
+    <linearGradient id="og-mark" x1="120" y1="200" x2="280" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#7C3AED"/>
     </linearGradient>
   </defs>
-  <rect width="1200" height="630" fill="url(#bg)"/>
-  <circle cx="1060" cy="90" r="230" fill="#4f46e5" opacity="0.18"/>
-  <circle cx="120" cy="560" r="180" fill="#8b5cf6" opacity="0.15"/>
-  <path d="M120 250 175 315 120 380 65 315z" fill="none" stroke="url(#mark)" stroke-width="10" stroke-linejoin="round"/>
-  <text x="220" y="300" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="86" font-weight="700" fill="#eef1f8">AnkSocial</text>
-  <text x="220" y="366" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="34" fill="#9aa4bf">A modern, community-first mini social platform.</text>
-  <text x="220" y="430" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="26" fill="#8b87ff">Posts · Discussions · Reactions · Reputation</text>
+  <rect width="1200" height="630" fill="url(#og-bg)"/>
+  <circle cx="1080" cy="80" r="260" fill="#4F46E5" opacity="0.16"/>
+  <circle cx="80" cy="580" r="200" fill="#7C3AED" opacity="0.14"/>
+  <rect x="120" y="215" width="160" height="160" rx="36" fill="url(#og-mark)"/>
+  <path d="M166 338 200 248 234 338" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M180 306h40" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="200" cy="248" r="8" fill="#C7D2FE"/>
+  <circle cx="166" cy="338" r="8" fill="#C7D2FE"/>
+  <circle cx="234" cy="338" r="8" fill="#C7D2FE"/>
+  <text x="320" y="300" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="92" font-weight="750" letter-spacing="-0.04em" fill="#F4F6FF">AES</text>
+  <text x="320" y="360" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="32" fill="#A5B0D0">Ank Ecosystem Social</text>
+  <text x="320" y="420" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="24" fill="#818CF8">Posts · Discussions · Reactions · Reputation</text>
 </svg>

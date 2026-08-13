@@ -37,9 +37,9 @@ export function getConfig(env: Bindings): AppConfig {
   return {
     environment,
     isProduction: environment === 'production',
-    siteName: env.SITE_NAME || 'AnkSocial',
+    siteName: env.SITE_NAME || 'AES',
     siteUrl: (env.SITE_URL || 'http://localhost:8787').replace(/\/+$/, ''),
-    siteDescription: env.SITE_DESCRIPTION || 'A modern, community-first mini social platform.',
+    siteDescription: env.SITE_DESCRIPTION || 'AES — Ank Ecosystem Social',
     storageProvider: (env.STORAGE_PROVIDER as AppConfig['storageProvider']) || 'r2',
     maxUploadBytes: intVar(env.MAX_UPLOAD_BYTES, 10 * 1024 * 1024),
     maxJsonBodyBytes: intVar(env.MAX_JSON_BODY_BYTES, 256 * 1024),

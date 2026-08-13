@@ -1,8 +1,8 @@
 {
-  "name": "ank-social",
+  "name": "aes",
   "version": "1.0.0",
   "private": true,
-  "description": "AnkSocial — a mini social platform running entirely on Cloudflare Workers + D1 + Backblaze B2",
+  "description": "AES — Ank Ecosystem Social. A mini social platform on Cloudflare Workers + D1 + Backblaze B2",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -14,7 +14,8 @@
     "build:css": "tailwindcss -i src/styles/app.css -o public/assets/app.css --minify",
     "build:client": "node scripts/build-client.mjs",
     "build:assets": "npm run build:css && npm run build:client",
-    "build": "npm run build:assets && npm run typecheck",
+    "bundle:migrations": "node scripts/bundle-migrations.mjs",
+    "build": "npm run bundle:migrations && npm run build:assets && npm run typecheck",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/client/tsconfig.json && tsc --noEmit -p tests/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -27,7 +28,7 @@
     "seed": "node scripts/seed.mjs --env local",
     "seed:remote": "node scripts/seed.mjs --remote --env preview",
     "create-admin": "node scripts/create-admin.mjs",
-    "deploy": "npm run build:assets && wrangler deploy --env=",
+    "deploy": "npm run bundle:migrations && npm run build:assets && wrangler d1 migrations apply ank-social --env= --remote && wrangler deploy --env=",
     "deploy:preview": "npm run build:assets && wrangler deploy --env preview",
     "deploy:prod": "npm run deploy",
     "check": "npm run typecheck && npm run test"

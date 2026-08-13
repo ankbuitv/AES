@@ -8,6 +8,7 @@
  */
 
 import { AppError } from '../utils/errors';
+import { ensureSchema, isMissingRelationError } from './schema';
 
 export type SqlParam = string | number | null | ArrayBuffer;
 
@@ -22,6 +23,9 @@ export class Db {
         .bind(...params)
         .first<T>();
     } catch (error) {
+      if (await this.recover(error)) {
+        return this.d1.prepare(sql).bind(...params).first<T>();
+      }
       throw wrap(error, sql);
     }
   }
@@ -35,6 +39,10 @@ export class Db {
         .all<T>();
       return result.results ?? [];
     } catch (error) {
+      if (await this.recover(error)) {
+        const result = await this.d1.prepare(sql).bind(...params).all<T>();
+        return result.results ?? [];
+      }
       throw wrap(error, sql);
     }
   }
@@ -54,6 +62,13 @@ export class Db {
         lastRowId: result.meta?.last_row_id ?? null,
       };
     } catch (error) {
+      if (await this.recover(error)) {
+        const result = await this.d1.prepare(sql).bind(...params).run();
+        return {
+          changes: result.meta?.changes ?? 0,
+          lastRowId: result.meta?.last_row_id ?? null,
+        };
+      }
       throw wrap(error, sql);
     }
   }
@@ -84,8 +99,24 @@ export class Db {
       );
       return await this.d1.batch<T>(prepared);
     } catch (error) {
+      if (await this.recover(error)) {
+        const prepared = statements.map(({ sql, params }) =>
+          this.d1.prepare(sql).bind(...(params ?? [])),
+        );
+        return await this.d1.batch<T>(prepared);
+      }
       throw wrap(error, statements[0]?.sql ?? 'batch');
     }
+  }
+
+  /**
+   * If a query failed because the schema is missing, apply bundled migrations
+   * once and let the caller retry. Returns true when a retry is worthwhile.
+   */
+  private async recover(error: unknown): Promise<boolean> {
+    if (!isMissingRelationError(error)) return false;
+    const status = await ensureSchema(this.d1);
+    return status.ok;
   }
 
   /** Escape-hatch for callers that need the raw binding (migrations, admin). */
@@ -109,7 +140,7 @@ function wrap(error: unknown, sql: string): AppError {
     return AppError.badRequest('Value is not allowed');
   }
 
-  return AppError.internal('Database error', { sql: sql.slice(0, 200), message });
+  return AppError.internal('Something went wrong', { sql: sql.slice(0, 200), message });
 }
 
 function extractConstraint(message: string): string {

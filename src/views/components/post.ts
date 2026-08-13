@@ -68,28 +68,37 @@ function reactionBar(post: PostDTO): RawHtml {
 }
 
 function actionBar(post: PostDTO, permalink: string): RawHtml {
+  const liked = post.viewerReaction === 'like' || !!post.viewerReaction;
   return raw(html`
     <div class="postcard__actions">
-      ${reactionBar(post)}
+      <button class="action ${post.viewerReaction ? 'is-active' : ''}" type="button"
+              data-reaction="like" data-reactions data-target-type="post" data-target-id="${post.id}"
+              aria-pressed="${liked ? 'true' : 'false'}" aria-label="Like">
+        ${icon('heart')} <span>Like</span>
+        <span data-reaction-count>${post.reactionCount || ''}</span>
+      </button>
       <a class="action" href="${permalink}#comments" aria-label="${post.commentCount} comments">
-        💬 <span data-comment-count>${post.commentCount}</span>
+        ${icon('comment')} <span>Comment</span>
+        <span data-comment-count>${post.commentCount || ''}</span>
       </a>
+      <button class="action" type="button" data-share data-url="${permalink}" data-title="${post.title || 'Post'}">
+        ${icon('share')} <span>Share</span>
+      </button>
       <button class="action ${post.viewerBookmarked ? 'is-active' : ''}" type="button"
               data-bookmark data-post-id="${post.id}"
-              aria-pressed="${post.viewerBookmarked ? 'true' : 'false'}">
-        ${icon('bookmark')} <span class="sr-only">Bookmark</span>
+              aria-pressed="${post.viewerBookmarked ? 'true' : 'false'}" aria-label="Bookmark">
+        ${icon('bookmark')} <span>Bookmark</span>
       </button>
-      <button class="action" type="button" data-share data-url="${permalink}" data-title="${post.title || 'Post'}">
-        ↗ <span class="sr-only">Share</span>
-      </button>
-      <span class="action action--static" title="${post.views} views">👁 ${post.views}</span>
-      ${post.canEdit ? raw(html`<a class="action" href="/compose?edit=${post.id}">Edit</a>`) : ''}
-      ${post.canDelete
-        ? raw(html`<button class="action action--danger" type="button" data-delete-post data-post-id="${post.id}">Delete</button>`)
-        : ''}
-      ${!post.canEdit
-        ? raw(html`<button class="action" type="button" data-report data-target-type="post" data-target-id="${post.id}">Report</button>`)
-        : ''}
+      <span class="postcard__more">
+        ${reactionBar(post)}
+        ${post.canEdit ? raw(html`<a class="action" href="/compose?edit=${post.id}">Edit</a>`) : ''}
+        ${post.canDelete
+          ? raw(html`<button class="action action--danger" type="button" data-delete-post data-post-id="${post.id}">Delete</button>`)
+          : ''}
+        ${!post.canEdit
+          ? raw(html`<button class="action" type="button" data-report data-target-type="post" data-target-id="${post.id}">Report</button>`)
+          : ''}
+      </span>
     </div>
   `);
 }
@@ -110,7 +119,7 @@ function header(post: PostDTO): RawHtml {
         </span>
       </div>
       ${post.category
-        ? raw(html`<a class="pill pill--category" href="/c/${post.category.slug}" style="--cat:${post.category.color}">${post.category.name}</a>`)
+        ? raw(html`<a class="pill pill--category" href="/category/${post.category.slug}" style="--cat:${post.category.color}">${post.category.name}</a>`)
         : ''}
     </header>
   `);
