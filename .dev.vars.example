@@ -1,7 +1,8 @@
 # ---------------------------------------------------------------------------
 # AnkSocial — local development secrets
 # Copy to `.dev.vars` (git-ignored) and fill in real values.
-# In preview/production these are set with:  wrangler secret put <NAME> [--env production]
+# In production these are set with: `wrangler secret put <NAME> --env=""`.
+# Add `--env preview` when configuring the optional preview Worker.
 # ---------------------------------------------------------------------------
 
 # Signing key for CSRF tokens, cookie integrity and internal HMACs.

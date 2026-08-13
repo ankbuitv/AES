@@ -5,10 +5,10 @@
  * threaded comments, reactions, follows and bookmarks.
  *
  *   npm run seed                 # local dev database
- *   npm run seed:remote          # remote (add --env preview|production)
+ *   npm run seed:remote          # remote preview database
  *
  * Every account gets the same demo password, printed at the end. This is a
- * development convenience only — never run it against a live community.
+ * development convenience only; the script refuses to target production.
  */
 
 import { execSql, nowSeconds, parseTarget, q } from './lib/d1.mjs';
@@ -17,8 +17,8 @@ import { hashPassword, newId, slugify, uniqueSlug } from './lib/passwords.mjs';
 const target = parseTarget();
 const DEMO_PASSWORD = 'ChangeMe!2026';
 
-if (target.remote && process.argv.includes('--env') && process.argv.includes('production')) {
-  console.error('Refusing to seed production. Remove --env production to continue.');
+if (target.remote && target.env !== 'preview') {
+  console.error('Refusing to seed the production database. Remote seeds must use --env preview.');
   process.exit(1);
 }
 

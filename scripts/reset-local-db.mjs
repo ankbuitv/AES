@@ -37,10 +37,10 @@ function run(args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-run(['d1', 'migrations', 'apply', 'ank-social', '--local']);
+run(['d1', 'migrations', 'apply', 'ank-social', '--env', 'local', '--local']);
 
 if (process.argv.includes('--seed')) {
-  const result = spawnSync('node', [path.join(root, 'scripts', 'seed.mjs'), '--local'], {
+  const result = spawnSync('node', [path.join(root, 'scripts', 'seed.mjs'), '--env', 'local'], {
     cwd: root,
     stdio: 'inherit',
   });
