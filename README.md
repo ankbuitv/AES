@@ -36,12 +36,19 @@ Posts (text, markdown, article, image, multi-image, link, code), threaded commen
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars      # fill in SESSION_SECRET and IP_HASH_SALT
+cp .dev.vars.example .dev.vars      # optional in dev; fill in SESSION_SECRET and IP_HASH_SALT
 npm run db:migrate:local            # apply all 8 migrations to the local D1
 npm run seed                        # optional: 5 members, 6 posts, comments
 npm run build:assets                # compile Tailwind CSS + the client bundle
 npm run dev                         # http://localhost:8787
 ```
+
+`npm run dev` works even without `.dev.vars`: in the `development` environment a
+fixed dev-only signing secret is used for CSRF tokens when `SESSION_SECRET` is
+absent, so registering, logging in and uploading images work out of the box.
+Copy the example file anyway if you want to exercise a real secret locally.
+**Preview and production never fall back** — there a missing `SESSION_SECRET`
+fails mutating requests with a clear CSRF error (never a 500).
 
 Verify:
 

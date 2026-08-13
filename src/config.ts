@@ -68,6 +68,26 @@ export function resolveOrigin(env: Bindings, request: Request): string {
   }
 }
 
+/**
+ * Signing secret for CSRF tokens and session-bound HMACs.
+ *
+ * A configured `SESSION_SECRET` always wins. When it is missing, local
+ * development falls back to a fixed dev-only value so `npm run dev` works out
+ * of the box: without it every state-changing request — including image
+ * uploads — is refused with a CSRF 403 the moment `.dev.vars` is absent.
+ *
+ * The fallback is NEVER applied outside `ENVIRONMENT === 'development'`.
+ * Preview and production require an operator-provided secret and fail closed
+ * (mutating requests get a clear CSRF error, never a 500).
+ */
+const DEV_ONLY_SESSION_SECRET = 'aes-local-dev-only-session-secret';
+
+export function resolveSessionSecret(env: Bindings): string {
+  if (env.SESSION_SECRET) return env.SESSION_SECRET;
+  if (env.ENVIRONMENT === 'development') return DEV_ONLY_SESSION_SECRET;
+  return '';
+}
+
 // --- Session / auth policy --------------------------------------------------
 export const SESSION_COOKIE = 'ank_session';
 export const CSRF_COOKIE = 'ank_csrf';
