@@ -2,16 +2,19 @@
  * Cryptography helpers built on WebCrypto (the only primitive available in
  * Workers — there is no argon2/bcrypt native module in the runtime).
  *
- * Password hashing uses PBKDF2-HMAC-SHA-256 with a per-password random salt and
- * a high iteration count. This is the strongest password KDF available inside
- * Workers without shipping a WASM binary; the encoded format carries its own
- * parameters so the iteration count can be raised later and existing hashes
- * transparently re-hashed on next successful login (see `needsRehash`).
+ * Password hashing uses PBKDF2-HMAC-SHA-256 with a per-password random salt.
+ * Cloudflare Workers limits PBKDF2 derivations to 100,000 iterations on the
+ * compatibility/runtime configurations used by this app. Going above that
+ * limit throws from `crypto.subtle.deriveBits()` and turns sign-up into an
+ * opaque Worker 500, so use the strongest portable value instead. The encoded
+ * format carries its own parameters, allowing a future compatible runtime to
+ * raise the work factor and transparently re-hash passwords on login.
  */
 
 import { base64UrlDecode, base64UrlEncode } from './id';
 
-const PBKDF2_ITERATIONS = 210_000; // OWASP 2023 guidance for PBKDF2-HMAC-SHA256
+/** Highest PBKDF2-HMAC-SHA-256 work factor portable across Cloudflare Workers. */
+export const PBKDF2_ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const KEY_BITS = 256;
 
@@ -39,8 +42,16 @@ export async function verifyPassword(password: string, stored: string): Promise<
     return false;
   }
 
-  const actual = await pbkdf2(password, salt, iterations);
-  return timingSafeEqual(actual, expected);
+  try {
+    const actual = await pbkdf2(password, salt, iterations);
+    return timingSafeEqual(actual, expected);
+  } catch {
+    // A legacy hash can carry a work factor that an older Workers runtime no
+    // longer accepts. Treat it as a non-match rather than leaking a WebCrypto
+    // exception as a 500; resetting that password will write the portable
+    // current format above.
+    return false;
+  }
 }
 
 /** True when a stored hash was produced with weaker parameters than current policy. */

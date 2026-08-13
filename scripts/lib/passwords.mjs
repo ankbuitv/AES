@@ -1,6 +1,6 @@
 /**
  * Node-side password hashing that produces byte-identical output to
- * `src/utils/crypto.ts` (PBKDF2-HMAC-SHA256, 210k iterations, base64url).
+ * `src/utils/crypto.ts` (PBKDF2-HMAC-SHA256, 100k iterations, base64url).
  *
  * Keeping the two implementations in the same format is what lets an account
  * created by `npm run create-admin` sign in through the Worker.
@@ -11,7 +11,9 @@ import { promisify } from 'node:util';
 
 const pbkdf2 = promisify(pbkdf2Cb);
 
-export const PBKDF2_ITERATIONS = 210_000;
+// Cloudflare Workers rejects higher PBKDF2 work factors on supported runtime
+// configurations. Keep this in lockstep with src/utils/crypto.ts.
+export const PBKDF2_ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const KEY_BYTES = 32;
 

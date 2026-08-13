@@ -5,7 +5,23 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { PBKDF2_ITERATIONS, hashPassword, needsRehash, verifyPassword } from '../src/utils/crypto';
 import { TestClient } from './helpers/client';
+
+describe('password hashing', () => {
+  it('writes a Cloudflare Workers-compatible PBKDF2 hash', async () => {
+    // Workers rejects the previous 210,000-round format on deployments whose
+    // WebCrypto PBKDF2 ceiling is 100,000. Keeping this assertion here makes a
+    // future security-tuning change explicit rather than silently breaking
+    // registration in production.
+    expect(PBKDF2_ITERATIONS).toBe(100_000);
+
+    const hash = await hashPassword('CorrectHorse!99');
+    expect(hash).toMatch(/^pbkdf2\$100000\$[^$]+\$[^$]+$/);
+    expect(await verifyPassword('CorrectHorse!99', hash)).toBe(true);
+    expect(needsRehash(hash)).toBe(false);
+  });
+});
 
 describe('registration', () => {
   it('creates an account and sets an HttpOnly session cookie', async () => {
