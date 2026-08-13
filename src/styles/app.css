@@ -273,16 +273,16 @@ code:not(pre code) {
 
 .topsearch__ico {
   position: absolute;
-  left: 0.7rem;
+  left: 0.9rem;
   width: 18px;
   height: 18px;
   color: var(--text-muted);
   pointer-events: none;
 }
 
-.topsearch input {
+.topsearch input[type='search'] {
   width: 100%;
-  padding: 0.55rem 0.8rem 0.55rem 2.3rem;
+  padding: 0.55rem 1rem 0.55rem 2.75rem;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--bg-sunken);
