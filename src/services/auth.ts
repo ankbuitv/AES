@@ -29,7 +29,7 @@ import type { IssuedSession } from '../db/repositories/sessions';
  * exist so that "unknown user" and "wrong password" cost the same time.
  */
 const DUMMY_HASH =
-  'pbkdf2$210000$AAAAAAAAAAAAAAAAAAAAAA$RGVjb3lIYXNoRGVjb3lIYXNoRGVjb3lIYXNoRGVjb3lIYXNo';
+  'pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 export interface ClientFingerprint {
   ip: string;

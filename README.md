@@ -273,7 +273,7 @@ public/                Static assets (favicon, icons, manifest, built CSS/JS)
 
 | Concern | Implementation |
 | --- | --- |
-| Passwords | PBKDF2-HMAC-SHA256, 210 000 iterations, per-password random salt; parameters encoded in the hash so they can be raised later |
+| Passwords | PBKDF2-HMAC-SHA256, 100 000 Workers-compatible iterations, per-password random salt; parameters encoded in the hash so they can be raised later |
 | Sessions | 32-byte random token in an `HttpOnly; Secure; SameSite=Lax` cookie; only its SHA-256 is stored; sliding 7-day idle expiry with a hard 30-day cap; rotated on login; revoked on logout and password change |
 | CSRF | Origin/Referer validation **plus** a signed double-submit token scoped to the session, sent as `x-csrf-token` or a `_csrf` form field |
 | XSS | Server-side escaping template (`html\`\``); Markdown is escaped first and then re-whitelisted; raw user HTML is never rendered; CSP is nonce-based with no `unsafe-inline` for scripts |
@@ -394,7 +394,7 @@ These are platform constraints, stated explicitly with the production-compatible
 4. **No image processing in the Workers runtime.** Resizing requires Cloudflare Images or a WASM codec. *Workaround:* `MediaService.generateVariants()` is written against an `IMAGES` binding and returns `[]` when it is absent; `?v=thumb` then transparently serves the original, and the `media_variants` job becomes a no-op. Binding Cloudflare Images enables real variants with no other change.
 5. **Relevance-ranked search cannot be keyset-paginated.** BM25 scores are not monotonic keys. *Workaround:* FTS5 search uses a bounded rank window capped at `MAX_SEARCH_DEPTH = 200`, the standard trade-off; feeds and all other lists use true keyset pagination. `SearchProvider` is an interface, so an external engine can replace FTS5 without touching routes.
 6. **No email delivery from Workers.** *Workaround:* password reset creates a real, hashed, 30-minute single-use token and returns `{requested, delivered:false}` identically for known and unknown addresses (no account enumeration). In non-production the token is echoed as `devToken` so the flow is testable; production omits it. Wiring MailChannels/Resend means implementing one function in `AuthService.requestPasswordReset`.
-7. **No argon2/bcrypt in the runtime.** Native modules and large WASM are impractical at the edge. *Workaround:* PBKDF2-HMAC-SHA256 at 210 000 iterations (current OWASP guidance), with the iteration count stored in the hash so it can be raised and hashes upgraded on next login.
+7. **No argon2/bcrypt in the runtime.** Native modules and large WASM are impractical at the edge, and Cloudflare Workers caps portable PBKDF2 derivations at 100 000 iterations. *Workaround:* PBKDF2-HMAC-SHA256 at that Workers-compatible ceiling, a 10-character minimum password policy and tight authentication rate limits. The iteration count is stored in each hash so it can be raised and hashes upgraded on a future compatible runtime.
 8. **Backblaze B2 has no per-object ACL usable from a browser.** *Workaround:* the bucket is private and the Worker is the only reader — which is the desired design anyway, since it lets every read be permission-checked and keeps credentials server-side.
 9. **`wrangler dev` does not fire Cron Triggers automatically.** *Workaround:* trigger them with `curl "http://localhost:8787/cdn-cgi/local/scheduled?cron=..."`; `tests/jobs.test.ts` calls `scheduled()` directly.
 
