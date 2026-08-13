@@ -76,10 +76,10 @@ npx wrangler whoami         # confirms the account
 
 ### 3. Create the Worker
 
-The Worker is created on first deploy from `wrangler.toml` (`name = "ank-social"`, `main = "worker/index.ts"`). To reserve the name now:
+The Worker is created on first deploy from `wrangler.toml` (`name = "anksocial"`, `main = "worker/index.ts"`). The top-level configuration is production because Cloudflare Workers Builds runs `npx wrangler deploy` without an environment flag. When using Workers Builds, name the connected dashboard Worker **`anksocial`** as well; the dashboard and Wrangler names must match.
 
 ```bash
-npx wrangler deploy --dry-run     # validates config and bundles without publishing
+npx wrangler deploy --dry-run --env=""  # validates production config without publishing
 ```
 
 ### 4. Create the D1 database
@@ -89,8 +89,7 @@ npx wrangler d1 create ank-social
 ```
 
 Copy the printed `database_id` into `wrangler.toml`, replacing the
-`00000000-0000-0000-0000-000000000000` placeholder in **all three** places
-(top level, `[env.preview]`, `[env.production]`). Create a separate database for preview if you want isolation:
+`00000000-0000-0000-0000-000000000000` production placeholder at the top level. The local environment intentionally has no ID because Wrangler simulates D1 locally. Create a separate database for preview and put its ID under `[env.preview]` if you want isolation:
 
 ```bash
 npx wrangler d1 create ank-social-preview
@@ -104,7 +103,7 @@ KV backs rate limiting and the storage auth-token cache.
 npx wrangler kv namespace create KV
 ```
 
-Copy the printed `id` into the `[[kv_namespaces]]` blocks in `wrangler.toml`.
+Copy the printed `id` into the top-level `[[kv_namespaces]]` block in `wrangler.toml` (and create a separate namespace for `[env.preview]` if used). The local namespace is simulated and needs no ID.
 
 ### 6. Run the migrations
 
@@ -122,8 +121,8 @@ All eight migrations (`0001_initial` … `0008_search`) are idempotent and track
 openssl rand -hex 32     # -> SESSION_SECRET
 openssl rand -hex 16     # -> IP_HASH_SALT
 
-npx wrangler secret put SESSION_SECRET --env production
-npx wrangler secret put IP_HASH_SALT   --env production
+npx wrangler secret put SESSION_SECRET --env=""
+npx wrangler secret put IP_HASH_SALT   --env=""
 ```
 
 `SESSION_SECRET` signs CSRF tokens; `IP_HASH_SALT` keys the one-way hash applied to IP addresses before they are stored.
@@ -140,13 +139,13 @@ In the Backblaze console:
 ### 9. Set the B2 secrets
 
 ```bash
-npx wrangler secret put B2_APPLICATION_KEY_ID --env production
-npx wrangler secret put B2_APPLICATION_KEY    --env production
-npx wrangler secret put B2_BUCKET_ID          --env production
-npx wrangler secret put B2_BUCKET_NAME        --env production
+npx wrangler secret put B2_APPLICATION_KEY_ID --env=""
+npx wrangler secret put B2_APPLICATION_KEY    --env=""
+npx wrangler secret put B2_BUCKET_ID          --env=""
+npx wrangler secret put B2_BUCKET_NAME        --env=""
 ```
 
-`[env.production.vars]` already sets `STORAGE_PROVIDER = "b2"`. Credentials exist only inside the Worker; they are never sent to a browser and never logged.
+The top-level production `[vars]` already sets `STORAGE_PROVIDER = "b2"`. Credentials exist only inside the Worker; they are never sent to a browser and never logged. Production has no R2 binding, so deploying does not require an R2 subscription; R2 is bound only in `[env.local]` and simulated by Wrangler.
 
 ### 10. Build the static assets
 
@@ -159,29 +158,27 @@ npm run build:assets     # Tailwind CSS -> public/assets/app.css, esbuild -> pub
 ### 11. Deploy
 
 ```bash
-npm run deploy:prod      # builds assets, then `wrangler deploy --env production`
+npm run deploy           # builds assets, then `wrangler deploy --env=""`
+# `npm run deploy:prod` is an alias for the same command
 ```
 
-The default `*.workers.dev` URL is printed on success.
+For Cloudflare Workers Builds, set the deploy command to `npx wrangler deploy --env=""`; the explicit empty environment selects this top-level production configuration and avoids Wrangler's multiple-environments warning. The default `*.workers.dev` URL is printed on success.
 
 ### 12. Attach the custom domain
 
-Add the domain to Cloudflare (orange-clouded), then uncomment the route block in `wrangler.toml`:
+Add the domain to Cloudflare (orange-clouded), then uncomment the top-level route directly below `workers_dev` in `wrangler.toml`:
 
 ```toml
-[env.production]
-routes = [
-  { pattern = "ankb.qzz.io", custom_domain = true }
-]
+routes = [{ pattern = "ankb.qzz.io", custom_domain = true }]
 ```
 
-Set `SITE_URL = "https://ankb.qzz.io"` under `[env.production.vars]` (already the default) and redeploy. The API is then reachable at `https://ankb.qzz.io/api/*` and media at `https://ankb.qzz.io/media/*`.
+Keep `SITE_URL = "https://ankb.qzz.io"` under the top-level `[vars]` block (already the default) and redeploy. The API is then reachable at `https://ankb.qzz.io/api/*` and media at `https://ankb.qzz.io/media/*`.
 
 ### 13. Confirm the production environment
 
 ```bash
-npx wrangler deployments list --env production
-npx wrangler secret list --env production      # names only, never values
+npx wrangler deployments list --env=""
+npx wrangler secret list --env=""      # names only, never values
 ```
 
 Check that `ENVIRONMENT = "production"`, which enables HSTS, disables the development password-reset token in API responses, and switches `robots.txt` from "block everything" to the real policy.
@@ -199,7 +196,7 @@ curl https://ankb.qzz.io/health
 ### 15. Create the administrator account
 
 ```bash
-npm run create-admin -- --username yourname --email you@example.com --remote --env production
+npm run create-admin -- --username yourname --email you@example.com --remote
 ```
 
 The password is typed at a masked prompt, hashed locally with the same PBKDF2-HMAC-SHA256 parameters the Worker uses, and only the hash is written. Re-running promotes an existing account, resets its password and revokes its sessions.
@@ -220,7 +217,7 @@ Sign in at `/login`, then:
 ### 17. Verify the scheduled jobs
 
 ```bash
-npx wrangler tail --env production --format pretty
+npx wrangler tail --env="" --format pretty
 ```
 
 The `*/15 * * * *` trigger drains the job queue, purges expired sessions and flushes the storage cleanup queue; `27 3 * * *` additionally aggregates yesterday's statistics, collects orphaned media, verifies storage integrity and reconciles denormalised counters. Locally you can fire them by hand:

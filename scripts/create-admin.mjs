@@ -2,7 +2,8 @@
 /**
  * Create (or promote) an administrator account.
  *
- *   npm run create-admin -- --username ank --email me@example.com [--remote] [--env production]
+ *   npm run create-admin -- --username ank --email me@example.com [--remote]
+ *   # Add --env preview only when targeting the preview database.
  *
  * The password is read from stdin without echoing and is never written to the
  * shell history, the process arguments or the logs. Only the PBKDF2 hash — in
