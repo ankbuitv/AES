@@ -108,6 +108,8 @@ export interface PostRow {
   comments_locked: number;
   pinned_at: number | null;
   edited_at: number | null;
+  scheduled_at?: number | null;
+  quote_post_id?: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -262,6 +264,16 @@ export interface PostDTO {
   canEdit: boolean;
   canDelete: boolean;
   canModerate: boolean;
+  pinned: boolean;
+  canPin: boolean;
+  readingMinutes: number;
+  scheduledAt?: number | null;
+  quotePost?: { id: string; slug: string; title: string; excerpt: string; authorUsername: string } | null;
+  poll?: {
+    options: { id: string; label: string; voteCount: number }[];
+    viewerOptionId: string | null;
+    totalVotes: number;
+  } | null;
 }
 
 export interface CommentDTO {

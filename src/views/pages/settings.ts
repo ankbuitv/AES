@@ -44,6 +44,7 @@ export function renderSettingsPage(input: SettingsPageInput): string {
       <a class="tab" href="#appearance">Appearance</a>
       <a class="tab" href="#media">Media</a>
       <a class="tab" href="#security">Security</a>
+      <a class="tab" href="#filters">Filters</a>
       <a class="tab" href="#danger">Account</a>
     </nav>
 
@@ -190,6 +191,24 @@ export function renderSettingsPage(input: SettingsPageInput): string {
       <form class="form form--inline" method="post" action="/api/auth/logout-all" data-settings-form data-reload="1">
         <input type="hidden" name="_csrf" value="${csrf}">
         <button class="btn btn--ghost" type="submit">Sign out everywhere</button>
+      </form>
+    </section>
+
+    <section class="panel" id="filters" aria-labelledby="filters-title">
+      <h2 class="panel__title" id="filters-title">Mutes & digest</h2>
+      <form class="form" method="post" action="/api/community/mutes" data-settings-form>
+        <input type="hidden" name="_csrf" value="${csrf}">
+        <input type="hidden" name="kind" value="word">
+        <div class="field">
+          <label for="mute-word">Mute a word</label>
+          <input id="mute-word" name="word" type="text" maxlength="40" placeholder="spam">
+        </div>
+        <button class="btn btn--primary" type="submit">Mute word</button>
+      </form>
+      <form class="form" method="post" action="/api/community/prefs/digest" data-settings-form>
+        <input type="hidden" name="_csrf" value="${csrf}">
+        <label class="checkbox"><input type="checkbox" name="enabled" value="1" checked> In-app digest of new posts</label>
+        <button class="btn btn--ghost" type="submit">Save digest</button>
       </form>
     </section>
 

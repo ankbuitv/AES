@@ -142,6 +142,14 @@ export function renderComposePage(input: ComposePageInput): string {
         </div>
       </div>
 
+      <div class="field">
+        <label for="pollOptions">Poll options <span class="muted">(one per line, optional)</span></label>
+        <textarea id="pollOptions" name="pollOptions" rows="4" maxlength="400" placeholder="Yes&#10;No&#10;Maybe"></textarea>
+      </div>
+      <div class="field">
+        <label for="scheduledAt">Schedule publish</label>
+        <input id="scheduledAt" name="scheduledAt" type="datetime-local">
+      </div>
       <div class="composer__foot">
         <button class="btn btn--ghost" type="submit" name="status" value="draft">Save draft</button>
         <button class="btn btn--primary" type="submit" name="status" value="published">Publish</button>

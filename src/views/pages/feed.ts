@@ -29,9 +29,9 @@ export interface FeedPageInput {
 
 export function feedTabsFor(signedIn: boolean): FeedTab[] {
   const tabs: FeedTab[] = [
-    { key: 'foryou', href: '/', label: 'For you' },
-    { key: 'latest', href: '/explore', label: 'Latest' },
+    { key: 'latest', href: '/', label: 'Latest' },
     { key: 'trending', href: '/trending', label: 'Trending' },
+    { key: 'foryou', href: '/explore', label: 'For you' },
   ];
   if (signedIn) tabs.push({ key: 'following', href: '/following', label: 'Following' });
   return tabs;
@@ -100,7 +100,13 @@ export function composer(csrfToken: string | null, categories: { slug: string; n
           <span>Add image</span>
         </label>
 
+        <label class="sr-only" for="composer-schedule">Schedule</label>
+        <input id="composer-schedule" name="scheduledAt" type="datetime-local">
         <button class="btn btn--primary" type="submit">Post</button>
+      </div>
+      <div class="field">
+        <label for="composer-poll">Poll options <span class="muted">(one per line)</span></label>
+        <textarea id="composer-poll" name="pollOptions" rows="3" maxlength="400" placeholder="Option A&#10;Option B"></textarea>
       </div>
       <p class="composer__hint muted">Markdown supported. Images are uploaded to your library first, then attached.</p>
     </form>

@@ -92,7 +92,7 @@ export class MediaService {
       throw AppError.unsupportedMedia(
         dangerous
           ? `Files of type "${dangerous}" are not allowed`
-          : 'Only JPEG, PNG, WebP and GIF images can be uploaded',
+          : 'Only JPEG, PNG, WebP, GIF, MP4 and WebM can be uploaded',
       );
     }
     if (dangerous && dangerous !== 'markup') {

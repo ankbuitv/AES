@@ -216,6 +216,26 @@ async function handleReaction(button: HTMLElement): Promise<void> {
   }
 }
 
+async function handlePin(button: HTMLElement): Promise<void> {
+  const postId = button.dataset.postId ?? '';
+  if (!postId) return;
+  try {
+    const data = await api<{ pinned: boolean }>(`/api/posts/${encodeURIComponent(postId)}/pin`, {
+      method: 'POST',
+    });
+    button.classList.toggle('is-active', data.pinned);
+    button.setAttribute('aria-pressed', data.pinned ? 'true' : 'false');
+    button.textContent = data.pinned ? 'Unpin' : 'Pin';
+    const card = button.closest<HTMLElement>('[data-post-card]');
+    card?.classList.toggle('postcard--pinned', data.pinned);
+    const feed = card?.closest<HTMLElement>('[data-feed]');
+    if (data.pinned && card && feed) feed.prepend(card);
+    toast(data.pinned ? 'Pinned to the top' : 'Unpinned');
+  } catch (error) {
+    toast(error instanceof Error ? error.message : 'Could not pin', 'error');
+  }
+}
+
 async function handleBookmark(button: HTMLElement): Promise<void> {
   const postId = button.dataset.postId ?? '';
   if (!postId) return;
@@ -357,9 +377,14 @@ function escapeHtml(value: string): string {
  * the sanitised `html` field is inserted as-is (the Worker produced it), while
  * every other value goes through `escapeHtml`.
  */
+function isFresh(createdAt: number): boolean {
+  return Date.now() / 1000 - createdAt < 2 * 60 * 60;
+}
+
 function renderPostCard(post: PostDTOLike): string {
   const author = post.author;
-  return `<article class="postcard" data-post-card data-post-id="${escapeHtml(post.id)}">
+  const fresh = isFresh(post.createdAt);
+  return `<article class="postcard${fresh ? ' postcard--fresh' : ''}" data-post-card data-post-id="${escapeHtml(post.id)}" data-created="${post.createdAt}">
     <div class="postcard__head">
       <div class="postcard__author">
         <a class="avatar avatar--md" href="/u/${encodeURIComponent(author.username)}">${
@@ -378,9 +403,36 @@ function renderPostCard(post: PostDTOLike): string {
       </div>
     </div>
     ${post.title ? `<h2 class="postcard__title"><a href="/post/${encodeURIComponent(post.slug)}">${escapeHtml(post.title)}</a></h2>` : ''}
-    <div class="postcard__body prose prose--sm prose--clamp">${post.html}</div>
+    <div class="postcard__excerpt" data-clamp>
+      <div class="prose prose--sm prose--clamp" data-clamp-body>${post.html}</div>
+      <a class="seemore" href="/post/${encodeURIComponent(post.slug)}" data-see-more>XEM THÊM >>></a>
+    </div>
     <p class="postcard__meta"><a href="/post/${encodeURIComponent(post.slug)}">${post.reactionCount} reactions · ${post.commentCount} comments</a></p>
   </article>`;
+}
+
+function markClamped(scope: ParentNode = document): void {
+  for (const wrap of $$<HTMLElement>('[data-clamp]', scope)) {
+    const body = wrap.querySelector<HTMLElement>('[data-clamp-body]');
+    if (!body) continue;
+    const overflowing = body.scrollHeight > body.clientHeight + 8;
+    wrap.classList.toggle('is-short', !overflowing);
+  }
+}
+
+function handleSeeMore(el: HTMLElement, event: Event): void {
+  const wrap = el.closest<HTMLElement>('[data-clamp]');
+  if (!wrap) return;
+  if (wrap.classList.contains('is-expanded')) {
+    wrap.classList.remove('is-expanded');
+    el.textContent = 'XEM THÊM >>>';
+    if (el instanceof HTMLAnchorElement) el.setAttribute('href', el.dataset.href || el.href);
+    return;
+  }
+  event.preventDefault();
+  if (el instanceof HTMLAnchorElement && !el.dataset.href) el.dataset.href = el.getAttribute('href') || '';
+  wrap.classList.add('is-expanded');
+  el.textContent = 'THU GỌN <<<';
 }
 
 async function loadMoreFeed(trigger: HTMLElement): Promise<void> {
@@ -448,11 +500,7 @@ async function submitComment(form: HTMLFormElement): Promise<void> {
 
     const list = $('[data-comment-list]');
     const parentInput = form.querySelector<HTMLInputElement>('[data-parent-input]');
-    const parentId = parentInput?.value;
-
-    if (parentId) {
-      const parent = $(`[data-comment-id="${CSS.escape(parentId)}"]`);
-      let replies = parent?.querySelector<HTMLElement>('.comment__replies');
+    const parentId = parentIrent?.querySelector<HTMLElement>('.comment__replies');
       if (parent && !replies) {
         replies = document.createElement('ul');
         replies.className = 'comment__replies';
@@ -640,7 +688,7 @@ async function submitComposer(form: HTMLFormElement): Promise<void> {
     }
     if (mediaIds.length) payload.set('mediaIds', mediaIds.join(','));
 
-    const data = await api<{ post: { slug: string } }>('/api/posts', {
+    const data = await api<{ post: PostDTOLike & { slug: string } }>('/api/posts', {
       method: 'POST',
       body: payload,
     });
@@ -873,6 +921,7 @@ function initDelegatedClicks(): void {
     const matchers: [string, (el: HTMLElement) => void | Promise<void>][] = [
       ['[data-reaction]', handleReaction],
       ['[data-comment-react]', handleReaction],
+      ['[data-pin]', handlePin],
       ['[data-bookmark]', handleBookmark],
       ['[data-share]', handleShare],
       ['[data-delete-post]', handleDeletePost],
@@ -883,6 +932,12 @@ function initDelegatedClicks(): void {
       ['[data-load-more-comments]', loadMoreComments],
       ['[data-load-more]', loadMoreFeed],
     ];
+
+    const seeMore = target.closest<HTMLElement>('[data-see-more]');
+    if (seeMore) {
+      handleSeeMore(seeMore, event);
+      return;
+    }
 
     for (const [selector, handler] of matchers) {
       const el = target.closest<HTMLElement>(selector);
@@ -973,12 +1028,259 @@ function initNotifications(): void {
   });
 }
 
+function newestSeen(feed: HTMLElement): number {
+  const attr = Number(feed.dataset.newest ?? 0);
+  if (attr > 0) return attr;
+  const first = feed.querySelector<HTMLElement>('[data-created]');
+  return Number(first?.dataset.created ?? 0);
+}
+
+function initLiveFeed(): void {
+  const feed = $<HTMLElement>('[data-feed]');
+  const button = $<HTMLButtonElement>('[data-new-posts]');
+  if (!feed || !button) return;
+
+  const endpoint = feed.dataset.endpoint ?? '/api/posts?sort=latest';
+  if (!endpoint.includes('sort=latest') && !endpoint.includes('sort=following')) return;
+
+  let pending: PostDTOLike[] = [];
+
+  const showPending = () => {
+    if (!pending.length) {
+      button.hidden = true;
+      button.classList.add('is-hidden');
+      return;
+    }
+    button.hidden = false;
+    button.classList.remove('is-hidden');
+    button.textContent = pending.length === 1 ? '1 new post' : `${pending.length} new posts`;
+  };
+
+  const poll = async () => {
+    if (document.hidden) return;
+    const since = newestSeen(feed);
+    if (!since) return;
+    try {
+      const url = `${endpoint}${endpoint.includes('?') ? '&' : '?'}since=${since}&limit=10`;
+      const page = await api<PageLike<PostDTOLike>>(url);
+      const existing = new Set(
+        $$<HTMLElement>('[data-post-id]', feed).map((el) => el.dataset.postId ?? ''),
+      );
+      const fresh = page.items.filter((item) => !existing.has(item.id));
+      if (!fresh.length) return;
+      const seen = new Set(pending.map((p) => p.id));
+      for (const item of fresh) {
+        if (!seen.has(item.id)) pending.push(item);
+      }
+      showPending();
+    } catch {
+      /* polling is best-effort */
+    }
+  };
+
+  button.addEventListener('click', () => {
+    if (!pending.length) return;
+    const html = pending
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(renderPostCard)
+      .join('');
+    feed.insertAdjacentHTML('afterbegin', html);
+    const top = pending.reduce((max, p) => Math.max(max, p.createdAt), newestSeen(feed));
+    feed.dataset.newest = String(top);
+    pending = [];
+    showPending();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  window.setInterval(() => void poll(), 25_000);
+  void poll();
+}
+
 function init(): void {
   initTheme();
   initDelegatedClicks();
   initForms();
   initNotifications();
   initStatusDashboard();
+  initLiveFeed();
+  markClamped();
+  initInfiniteScroll();
+  initComposerDraft();
+  initReaderExtras();
+  initCommunityActions();
+}
+
+function initInfiniteScroll(): void {
+  const more = $<HTMLElement>('[data-load-more]');
+  if (!more || !('IntersectionObserver' in window)) return;
+  const io = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) void loadMoreFeed(more);
+  });
+  io.observe(more);
+}
+
+function initComposerDraft(): void {
+  const field = $<HTMLTextAreaElement>('[data-composer-content]');
+  if (!field) return;
+  const key = 'aes-draft';
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved && !field.value) field.value = saved;
+  } catch {
+    /* private mode */
+  }
+  field.addEventListener('input', () => {
+    try {
+      localStorage.setItem(key, field.value);
+    } catch {
+      /* ignore */
+    }
+  });
+  document.addEventListener('submit', (event) => {
+    const form = event.target as HTMLFormElement;
+    if (form?.matches('[data-composer]')) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+}
+
+function initReaderExtras(): void {
+  const article = $('.post .prose');
+  const tocList = $<HTMLElement>('[data-toc-list]');
+  const toc = $<HTMLElement>('[data-toc]');
+  if (article && tocList && toc) {
+    const heads = Array.from(article.querySelectorAll('h2, h3'));
+    if (heads.length) {
+      toc.hidden = false;
+      heads.forEach((h, i) => {
+        if (!h.id) h.id = `h-${i}`;
+        const li = document.createElement('li');
+        li.innerHTML = `<a href="#${h.id}">${escapeHtml(h.textContent || '')}</a>`;
+        tocList.appendChild(li);
+      });
+    }
+  }
+
+  const bar = $<HTMLElement>('[data-read-progress]');
+  if (bar && article) {
+    bar.hidden = false;
+    const onScroll = () => {
+      const rect = article.getBoundingClientRect();
+      const total = article.scrollHeight - window.innerHeight;
+      const done = Math.min(100, Math.max(0, ((-rect.top) / Math.max(1, total)) * 100));
+      bar.style.width = `${done}%`;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+  }
+
+  const related = $<HTMLElement>('[data-related]');
+  if (related?.dataset.postId) {
+    void api<{ posts: { slug: string; title: string; author: string }[] }>(
+      `/api/community/related/${encodeURIComponent(related.dataset.postId)}`,
+    )
+      .then((data) => {
+        const host = $('[data-related-list]', related);
+        if (!host) return;
+        host.innerHTML = (data.posts || [])
+          .map(
+            (p) =>
+              `<a class="related__item" href="/post/${encodeURIComponent(p.slug)}">${escapeHtml(p.title)} <span class="muted">@${escapeHtml(p.author)}</span></a>`,
+          )
+          .join('');
+      })
+      .catch(() => undefined);
+  }
+
+  document.addEventListener('click', (event) => {
+    const t = event.target as HTMLElement | null;
+    if (t?.closest('[data-reader-mode]')) {
+      document.body.classList.toggle('is-reader');
+    }
+    const imgLink = t?.closest<HTMLAnchorElement>('[data-lightbox]');
+    if (imgLink) {
+      event.preventDefault();
+      openLightbox(imgLink.href);
+    }
+  });
+}
+
+function openLightbox(src: string): void {
+  const existing = $('.lightbox');
+  existing?.remove();
+  const box = document.createElement('div');
+  box.className = 'lightbox';
+  box.innerHTML = `<button type="button" class="lightbox__close" aria-label="Close">×</button><img src="${escapeHtml(src)}" alt="">`;
+  box.addEventListener('click', () => box.remove());
+  document.body.appendChild(box);
+}
+
+function initCommunityActions(): void {
+  document.addEventListener('submit', (event) => {
+    const form = event.target as HTMLFormElement | null;
+    if (!form?.matches('[data-poll]')) return;
+    event.preventDefault();
+    const postId = form.dataset.postId ?? '';
+    const picked = form.querySelector<HTMLInputElement>('input[name="optionId"]:checked');
+    if (!postId || !picked) return;
+    const body = new FormData();
+    body.set('optionId', picked.value);
+    void api<{ options: { id: string; voteCount: number }[] }>(
+      `/api/community/vote/${encodeURIComponent(postId)}`,
+      { method: 'POST', body },
+    )
+      .then((data) => {
+        for (const opt of data.options) {
+          const row = form.querySelector(`[value="${CSS.escape(opt.id)}"]`)?.closest('label');
+          const count = row?.querySelector('.muted');
+          if (count) count.textContent = String(opt.voteCount);
+        }
+        toast('Vote saved');
+      })
+      .catch((error) => toast(error instanceof Error ? error.message : 'Could not vote', 'error'));
+  });
+
+  document.addEventListener('click', (event) => {
+    const t = event.target as HTMLElement | null;
+    const quote = t?.closest('[data-quote-comment]');
+    if (quote) {
+      const comment = quote.closest('[data-comment-id]');
+      const author = comment?.querySelector('.comment__author')?.textContent?.trim() ?? 'someone';
+      const text = comment?.querySelector('.prose')?.textContent?.trim() ?? '';
+      const area = $<HTMLTextAreaElement>('[data-comment-form] textarea');
+      if (area) {
+        area.value = `> @${author}: ${text.slice(0, 280)}\n\n${area.value}`;
+        area.focus();
+      }
+    }
+
+    const repost = t?.closest<HTMLElement>('[data-repost]');
+    if (repost?.dataset.postId) {
+      event.preventDefault();
+      void api(`/api/community/repost/${encodeURIComponent(repost.dataset.postId)}`, { method: 'POST' })
+        .then(() => {
+          toast('Reposted');
+          location.reload();
+        })
+        .catch((error) => toast(error instanceof Error ? error.message : 'Could not repost', 'error'));
+    }
+
+    const who = t?.closest<HTMLElement>('[data-who-liked]');
+    if (who?.dataset.postId) {
+      event.preventDefault();
+      void api<{ people: { username: string; displayName: string; reaction: string }[] }>(
+        `/api/community/reactions/${encodeURIComponent(who.dataset.postId)}`,
+      )
+        .then((data) => {
+          const names = data.people.map((p) => `@${p.username} (${p.reaction})`).join(', ') || 'No reactions yet';
+          toast(names);
+        })
+        .catch(() => toast('Could not load reactions', 'error'));
+    }
+  });
 }
 
 if (document.readyState === 'loading') {
@@ -987,4 +1289,12 @@ if (document.readyState === 'loading') {
   init();
 }
 
+export {};
+State === 'loading') {
+  document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+  init();
+}
+
+export {};
 export {};

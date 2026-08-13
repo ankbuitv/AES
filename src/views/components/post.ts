@@ -28,15 +28,35 @@ function mediaGrid(post: PostDTO): RawHtml {
       ${post.media.map(
         (m) => raw(html`
           <figure class="mediagrid__item">
-            <a href="${m.url}" target="_blank" rel="noopener">
+            ${m.mimeType.startsWith('video/')
+              ? raw(html`<video class="mediagrid__video" src="${m.url}" controls playsinline preload="metadata"></video>`)
+              : raw(html`<a href="${m.url}" data-lightbox>
               <img src="${m.thumbUrl}" alt="${m.altText || 'Attached image'}"
                    ${m.width ? raw(`width="${m.width}"`) : ''} ${m.height ? raw(`height="${m.height}"`) : ''}
                    loading="lazy" decoding="async">
-            </a>
+            </a>`)}
             ${m.altText ? raw(html`<figcaption class="sr-only">${m.altText}</figcaption>`) : ''}
           </figure>`),
       )}
     </div>
+  `);
+}
+
+function pollBlock(post: PostDTO): RawHtml {
+  if (!post.poll?.options.length) return raw('');
+  return raw(html`
+    <form class="poll" data-poll data-post-id="${post.id}">
+      ${post.poll.options.map(
+        (opt) => raw(html`
+          <label class="poll__opt ${post.poll?.viewerOptionId === opt.id ? 'is-active' : ''}">
+            <input type="radio" name="optionId" value="${opt.id}" ${post.poll?.viewerOptionId === opt.id ? raw('checked') : ''}>
+            <span>${opt.label}</span>
+            <span class="muted">${opt.voteCount}</span>
+          </label>`),
+      )}
+      <button class="btn btn--small btn--primary" type="submit">Vote</button>
+      <p class="muted">${post.poll.totalVotes} votes</p>
+    </form>
   `);
 }
 
@@ -84,6 +104,8 @@ function actionBar(post: PostDTO, permalink: string): RawHtml {
       <button class="action" type="button" data-share data-url="${permalink}" data-title="${post.title || 'Post'}">
         ${icon('share')} <span>Share</span>
       </button>
+      <button class="action" type="button" data-repost data-post-id="${post.id}">Repost</button>
+      <button class="action" type="button" data-who-liked data-post-id="${post.id}">Who liked</button>
       <button class="action ${post.viewerBookmarked ? 'is-active' : ''}" type="button"
               data-bookmark data-post-id="${post.id}"
               aria-pressed="${post.viewerBookmarked ? 'true' : 'false'}" aria-label="Bookmark">
@@ -91,6 +113,11 @@ function actionBar(post: PostDTO, permalink: string): RawHtml {
       </button>
       <span class="postcard__more">
         ${reactionBar(post)}
+        ${post.canPin
+          ? raw(html`<button class="action ${post.pinned ? 'is-active' : ''}" type="button"
+                    data-pin data-post-id="${post.id}" aria-pressed="${post.pinned ? 'true' : 'false'}">
+              ${post.pinned ? 'Unpin' : 'Pin'}</button>`)
+          : ''}
         ${post.canEdit ? raw(html`<a class="action" href="/compose?edit=${post.id}">Edit</a>`) : ''}
         ${post.canDelete
           ? raw(html`<button class="action action--danger" type="button" data-delete-post data-post-id="${post.id}">Delete</button>`)
@@ -112,6 +139,13 @@ function header(post: PostDTO): RawHtml {
         <span class="postcard__sub">
           <a href="/u/${post.author.username}">@${post.author.username}</a>
           · <time datetime="${toIso(post.createdAt)}" title="${toIso(post.createdAt)}">${relativeTime(post.createdAt)}</time>
+          ${post.pinned ? raw(html`· <span class="pill pill--pin">Pinned</span>`) : ''}
+          ${Date.now() / 1000 - post.createdAt < 2 * 60 * 60
+            ? raw(html`· <span class="pill pill--new">New</span>`)
+            : ''}
+          ${post.readingMinutes
+            ? raw(html`· <span class="muted">${post.readingMinutes} min read</span>`)
+            : ''}
           ${post.editedAt ? raw(html`· <span class="muted">edited</span>`) : ''}
           ${post.visibility !== 'public'
             ? raw(html`· <span class="pill pill--muted">${post.visibility === 'followers' ? 'Followers' : 'Private'}</span>`)
@@ -129,13 +163,16 @@ function header(post: PostDTO): RawHtml {
 export function postCard(post: PostDTO): string {
   const permalink = `/post/${post.slug}`;
   return html`
-    <article class="postcard" data-post-card data-post-id="${post.id}" aria-labelledby="post-${post.id}-title">
+    <article class="postcard${post.pinned ? ' postcard--pinned' : ''}${Date.now() / 1000 - post.createdAt < 2 * 60 * 60 ? ' postcard--fresh' : ''}" data-post-card data-post-id="${post.id}" data-created="${post.createdAt}" aria-labelledby="post-${post.id}-title">
       ${header(post)}
       <div class="postcard__body">
         ${post.title
           ? raw(html`<h2 class="postcard__title" id="post-${post.id}-title"><a href="${permalink}">${post.title}</a></h2>`)
           : raw(html`<h2 class="sr-only" id="post-${post.id}-title">Post by ${post.author.username}</h2>`)}
-        <div class="prose prose--clamp">${raw(post.html)}</div>
+        <div class="postcard__excerpt" data-clamp>
+          <div class="prose prose--clamp" data-clamp-body>${raw(post.html)}</div>
+          <a class="seemore" href="${permalink}" data-see-more>XEM THÊM >>></a>
+        </div>
         ${post.contentType === 'link' && post.linkUrl
           ? raw(html`<a class="linkcard" href="${post.linkUrl}" rel="noopener nofollow" target="_blank">
               <span class="linkcard__host">${safeHost(post.linkUrl)}</span>
@@ -143,6 +180,7 @@ export function postCard(post: PostDTO): string {
             </a>`)
           : ''}
         ${mediaGrid(post)}
+        ${pollBlock(post)}
         ${tagList(post)}
       </div>
       ${actionBar(post, permalink)}
@@ -165,6 +203,7 @@ export function postArticle(post: PostDTO): string {
           </a>`)
         : ''}
       ${mediaGrid(post)}
+      ${pollBlock(post)}
       ${tagList(post)}
       ${actionBar(post, permalink)}
     </article>

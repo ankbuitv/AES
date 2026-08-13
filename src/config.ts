@@ -43,7 +43,7 @@ export function getConfig(env: Bindings): AppConfig {
     storageProvider: (env.STORAGE_PROVIDER as AppConfig['storageProvider']) || 'r2',
     maxUploadBytes: intVar(env.MAX_UPLOAD_BYTES, 10 * 1024 * 1024),
     maxJsonBodyBytes: intVar(env.MAX_JSON_BODY_BYTES, 256 * 1024),
-    allowedUploadMime: (env.ALLOWED_UPLOAD_MIME || 'image/jpeg,image/png,image/webp,image/gif')
+    allowedUploadMime: (env.ALLOWED_UPLOAD_MIME || 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm')
       .split(',')
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),

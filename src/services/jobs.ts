@@ -96,8 +96,39 @@ export class JobRunner {
         return;
       }
 
+      case 'publish_scheduled': {
+        const due = await this.ctx.repos.extras.dueScheduled(25);
+        for (const row of due) {
+          await this.ctx.repos.extras.publishScheduled(row.id);
+        }
+        return;
+      }
+
+      case 'email_digest': {
+        const users = await this.ctx.repos.extras.usersWantingDigest();
+        for (const user of users) {
+          const since = user.digest_last_at ?? now() - 86400;
+          const posts = await this.ctx.repos.extras.recentPublicPostsSince(since, 6);
+          if (!posts.length) continue;
+          await this.ctx.repos.notifications.createMany([
+            {
+              userId: user.user_id,
+              actorId: null,
+              type: 'SYSTEM',
+              targetType: 'digest',
+              targetId: String(now()),
+              data: {
+                title: `${posts.length} new posts`,
+                body: posts.map((p) => p.title || p.excerpt).join(' · ').slice(0, 240),
+              },
+            },
+          ]);
+          await this.ctx.repos.extras.markDigestSent(user.user_id);
+        }
+        return;
+      }
+
       default:
-        // Unknown types are dropped rather than retried forever.
         this.ctx.logger.warn('job_unknown_type', { type });
     }
   }
@@ -146,6 +177,13 @@ export async function runScheduled(ctx: ServiceContext, cron: string): Promise<M
   const nightly = cron.startsWith('27 3') || cron === 'nightly';
 
   report.jobs = await safely(errors, 'jobs', () => new JobRunner(ctx).drain(nightly ? 50 : 25));
+  await safely(errors, 'scheduled_posts', async () => {
+    const due = await ctx.repos.extras.dueScheduled(40);
+    for (const row of due) await ctx.repos.extras.publishScheduled(row.id);
+  });
+  if (nightly) {
+    await safely(errors, 'digest', () => ctx.repos.jobs.enqueue('email_digest', {}));
+  }
   report.sessionsPurged = await safely(errors, 'sessions', () =>
     ctx.repos.sessions.purgeExpired(1000),
   );

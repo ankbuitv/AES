@@ -19,6 +19,7 @@ import { AppError } from '../utils/errors';
 import { LIMITS } from '../config';
 import { buildPage, type Cursor } from '../utils/cursor';
 import { extractHashtags, extractMentions, renderPostContent, toPlainText } from '../utils/markdown';
+import { now } from '../utils/time';
 import { toPublicUser } from '../db/repositories/users';
 import type { FeedSort, MediaJoinRow, PostWithAuthor } from '../db/repositories/posts';
 import type { CommentWithAuthor } from '../db/repositories/comments';
@@ -66,6 +67,9 @@ export class PostService {
     codeLanguage?: string;
     tags?: string[];
     mediaIds?: string[];
+    pollOptions?: string[];
+    scheduledAt?: number;
+    quotePostId?: string;
   }): Promise<PostDTO> {
     const { repos } = this.ctx;
 
@@ -105,7 +109,21 @@ export class PostService {
 
     await this.syncTags(postId, input.content, input.tags ?? [], input.contentType);
 
-    if (input.status === 'published') {
+    if (input.pollOptions?.length) {
+      await repos.extras.setPoll(
+        postId,
+        input.pollOptions.map((o) => o.trim()).filter(Boolean),
+      );
+    }
+    if (input.scheduledAt && input.scheduledAt > now()) {
+      await repos.extras.setScheduled(postId, input.scheduledAt);
+    }
+    if (input.quotePostId) {
+      const quoted = await repos.posts.findById(input.quotePostId);
+      if (quoted && quoted.status === 'published') await repos.extras.setQuote(postId, quoted.id);
+    }
+
+    if (input.status === 'published' && !(input.scheduledAt && input.scheduledAt > now())) {
       if (categoryId) await repos.categories.incrementCount(categoryId, 1);
       this.ctx.defer(this.afterPublish(postId, input.author, input.content));
     }
@@ -233,12 +251,12 @@ export class PostService {
       throw AppError.forbidden('You can only delete your own posts');
     }
 
-    await repos.posts.setStatus(post.id, 'deleted');
+    const tags = await repos.posts.listTags(post.id);
+    await repos.posts.hardDelete(post.id);
     if (post.category_id) await repos.categories.incrementCount(post.category_id, -1);
 
     this.ctx.defer(async () => {
       await this.xp.revoke(post.author_id, 'post', { type: 'post', id: post.id });
-      const tags = await repos.posts.listTags(post.id);
       if (tags.length) {
         const rows = await repos.tags.ensureMany(tags.map((t) => t.slug));
         await repos.tags.incrementCounts(rows.map((r) => r.id), -1);
@@ -300,7 +318,9 @@ export class PostService {
     if (owns || isStaff(viewer)) return;
 
     if (post.status !== 'published') throw AppError.notFound('Post not found');
-    if (post.author_status !== 'active') throw AppError.notFound('Post not found');
+    if (post.author_status === 'deleted' || post.author_status === 'banned') {
+      throw AppError.notFound('Post not found');
+    }
     if (post.visibility === 'private') throw AppError.forbidden('This post is private');
     if (post.visibility === 'followers') {
       if (!viewer) throw AppError.unauthenticated('Sign in to view this post');
@@ -332,16 +352,66 @@ export class PostService {
     limit: number;
     tagSlug?: string;
     categorySlug?: string;
+    since?: number;
+    window?: 'day' | 'week' | 'month';
+    followedTagsOnly?: boolean;
   }) {
+    const firstPage = !options.cursor && !options.since && !options.tagSlug && !options.categorySlug;
+    const pinned =
+      firstPage && options.sort === 'latest'
+        ? await this.ctx.repos.posts.listPinned({
+            viewerId: options.viewer?.id ?? null,
+            limit: 8,
+          })
+        : [];
+    const excludeIds = pinned.map((row) => row.id);
+
+    let tagSlug = options.tagSlug;
+    if (options.followedTagsOnly && options.viewer) {
+      const slugs = await this.ctx.repos.extras.followedTagSlugs(options.viewer.id);
+      if (!slugs.length) {
+        return { items: [], nextCursor: null, hasMore: false };
+      }
+      tagSlug = tagSlug || slugs[0];
+    }
+
+    const windowSecs =
+      options.window === 'day' ? 86400 : options.window === 'week' ? 86400 * 7 : undefined;
+
     const rows = await this.ctx.repos.posts.feed({
       viewerId: options.viewer?.id ?? null,
       cursor: options.cursor,
-      limit: options.limit,
+      limit: options.limit + 10,
       sort: options.sort,
-      ...(options.tagSlug ? { tagSlug: options.tagSlug } : {}),
+      ...(tagSlug ? { tagSlug } : {}),
       ...(options.categorySlug ? { categorySlug: options.categorySlug } : {}),
+      ...(options.since ? { since: options.since } : {}),
+      ...(excludeIds.length ? { excludeIds } : {}),
+      ...(windowSecs ? { sinceWindow: windowSecs } : {}),
     });
-    return this.pageOfPosts(rows, options.limit, options.viewer, options.sort);
+
+    let merged = firstPage && pinned.length ? [...pinned, ...rows] : rows;
+    if (options.viewer) {
+      merged = await this.applyMutes(merged, options.viewer.id);
+    }
+    return this.pageOfPosts(merged, options.limit + pinned.length, options.viewer, options.sort);
+  }
+
+  private async applyMutes(rows: PostWithAuthor[], userId: string): Promise<PostWithAuthor[]> {
+    try {
+      const mutes = await this.ctx.repos.extras.listMutes(userId);
+      if (!mutes.length) return rows;
+      const users = new Set(mutes.filter((m) => m.kind === 'user').map((m) => m.target_id));
+      const words = mutes.filter((m) => m.kind === 'word').map((m) => m.word).filter(Boolean);
+      return rows.filter((row) => {
+        if (users.has(row.author_id)) return false;
+        if (!words.length) return true;
+        const hay = `${row.title} ${row.content}`.toLowerCase();
+        return !words.some((word) => hay.includes(word));
+      });
+    } catch {
+      return rows;
+    }
   }
 
   async byAuthor(options: {
@@ -351,6 +421,16 @@ export class PostService {
     limit: number;
     mediaOnly?: boolean;
   }) {
+    const firstPage = !options.cursor;
+    const pinned = firstPage
+      ? await this.ctx.repos.posts.listPinned({
+          viewerId: options.viewer?.id ?? null,
+          limit: 3,
+          authorId: options.authorId,
+        })
+      : [];
+    const excludeIds = pinned.map((row) => row.id);
+
     const rows = await this.ctx.repos.posts.byAuthor({
       authorId: options.authorId,
       viewerId: options.viewer?.id ?? null,
@@ -358,8 +438,10 @@ export class PostService {
       limit: options.limit,
       includeDrafts: options.viewer?.id === options.authorId,
       ...(options.mediaOnly ? { mediaOnly: true } : {}),
+      ...(excludeIds.length ? { excludeIds } : {}),
     });
-    return this.pageOfPosts(rows, options.limit, options.viewer, 'latest');
+    const merged = firstPage && pinned.length ? [...pinned, ...rows] : rows;
+    return this.pageOfPosts(merged, options.limit + pinned.length, options.viewer, 'latest');
   }
 
   async bookmarks(options: { viewer: AuthUser; cursor: Cursor | null; limit: number }) {
@@ -384,7 +466,7 @@ export class PostService {
     const page = rows.slice(0, limit);
     const ids = page.map((row) => row.id);
 
-    const [tagMap, mediaMap, reactionMap, bookmarkSet] = await Promise.all([
+    const [tagMap, mediaMap, reactionMap, bookmarkSet, pollMap, voteMap] = await Promise.all([
       this.ctx.repos.posts.tagsForPosts(ids),
       this.ctx.repos.posts.mediaForPosts(ids),
       viewer
@@ -393,6 +475,10 @@ export class PostService {
       viewer
         ? this.ctx.repos.bookmarks.getMany(viewer.id, ids)
         : Promise.resolve(new Set<string>()),
+      this.ctx.repos.extras.pollForPosts(ids).catch(() => new Map()),
+      viewer
+        ? this.ctx.repos.extras.viewerVotes(viewer.id, ids).catch(() => new Map<string, string>())
+        : Promise.resolve(new Map<string, string>()),
     ]);
 
     return buildPage(
@@ -406,6 +492,8 @@ export class PostService {
           viewerReaction: reactionMap.get(row.id) ?? null,
           viewerBookmarked: bookmarkSet.has(row.id),
           includeSource: false,
+          poll: pollMap.get(row.id) ?? [],
+          viewerOptionId: voteMap.get(row.id) ?? null,
         }),
       (row) => ({
         v: sort === 'trending' || sort === 'foryou' ? row.hot_score : row.created_at,
@@ -419,7 +507,7 @@ export class PostService {
     post: PostWithAuthor,
     options: { viewer: Viewer; includeSource?: boolean },
   ): Promise<PostDTO> {
-    const [tags, mediaMap, viewerReaction, viewerBookmarked] = await Promise.all([
+    const [tags, mediaMap, viewerReaction, viewerBookmarked, polls, votes] = await Promise.all([
       this.ctx.repos.posts.listTags(post.id),
       this.ctx.repos.posts.mediaForPosts([post.id]),
       options.viewer
@@ -428,6 +516,10 @@ export class PostService {
       options.viewer
         ? this.ctx.repos.bookmarks.has(options.viewer.id, post.id)
         : Promise.resolve(false),
+      this.ctx.repos.extras.pollForPosts([post.id]).catch(() => new Map()),
+      options.viewer
+        ? this.ctx.repos.extras.viewerVotes(options.viewer.id, [post.id]).catch(() => new Map<string, string>())
+        : Promise.resolve(new Map<string, string>()),
     ]);
 
     return this.mapPost(post, {
@@ -437,6 +529,8 @@ export class PostService {
       viewerReaction,
       viewerBookmarked,
       includeSource: options.includeSource ?? false,
+      poll: polls.get(post.id) ?? [],
+      viewerOptionId: votes.get(post.id) ?? null,
     });
   }
 
@@ -449,6 +543,8 @@ export class PostService {
       viewerReaction: ReactionType | null;
       viewerBookmarked: boolean;
       includeSource: boolean;
+      poll?: { id: string; label: string; voteCount: number }[];
+      viewerOptionId?: string | null;
     },
   ): PostDTO {
     const deleted = row.status === 'deleted';
@@ -489,8 +585,8 @@ export class PostService {
       editedAt: row.edited_at,
       author: {
         id: row.author_id,
-        username: row.author_username,
-        displayName: row.author_display_name,
+        username: row.author_username || 'unknown',
+        displayName: row.author_display_name || row.author_username || 'Unknown',
         bio: '',
         location: '',
         website: '',
@@ -524,7 +620,51 @@ export class PostService {
       canEdit,
       canDelete: canEdit,
       canModerate: isStaff(extra.viewer),
+      pinned: row.pinned_at != null,
+      canPin: !!extra.viewer && (row.author_id === extra.viewer.id || isStaff(extra.viewer)),
+      readingMinutes: Math.max(
+        1,
+        Math.ceil(toPlainText(row.content, 20_000).split(/\s+/).filter(Boolean).length / 200),
+      ),
+      scheduledAt: row.scheduled_at ?? null,
+      poll: extra.poll?.length
+        ? {
+            options: extra.poll,
+            viewerOptionId: extra.viewerOptionId ?? null,
+            totalVotes: extra.poll.reduce((sum, o) => sum + o.voteCount, 0),
+          }
+        : null,
     };
+  }
+
+  async pin(input: { postId: string; viewer: AuthUser }): Promise<{ pinned: boolean }> {
+    const post = await this.ctx.repos.posts.findById(input.postId);
+    if (!post || post.status === 'deleted') throw AppError.notFound('Post not found');
+
+    const owns = post.author_id === input.viewer.id;
+    if (!owns && !isStaff(input.viewer)) {
+      throw AppError.forbidden('You can only pin your own posts');
+    }
+    if (post.status !== 'published') {
+      throw AppError.badRequest('Only published posts can be pinned');
+    }
+
+    if (post.pinned_at) {
+      await this.ctx.repos.posts.setPinned(post.id, null);
+      return { pinned: false };
+    }
+
+    const authorPins = await this.ctx.repos.posts.countPinned(post.author_id);
+    if (owns && !isStaff(input.viewer) && authorPins >= 3) {
+      throw AppError.badRequest('You can pin up to 3 posts on your profile');
+    }
+    const globalPins = await this.ctx.repos.posts.countPinned();
+    if (isStaff(input.viewer) && globalPins >= 8) {
+      throw AppError.badRequest('The feed already has 8 pinned posts');
+    }
+
+    await this.ctx.repos.posts.setPinned(post.id, now());
+    return { pinned: true };
   }
 
   private canEdit(post: PostWithAuthor, viewer: Viewer): boolean {

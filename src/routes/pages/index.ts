@@ -82,21 +82,21 @@ interface FeedRouteConfig {
 
 const FEEDS: FeedRouteConfig[] = [
   {
-    sort: 'foryou',
-    heading: 'Your feed',
-    subheading: 'A blend of what you follow and what the community is reading.',
+    sort: 'latest',
+    heading: 'Latest',
+    subheading: 'Newest posts first — what just landed.',
     path: '/',
     navKey: 'home',
-    tabKey: 'foryou',
-    cacheSeconds: 30,
+    tabKey: 'latest',
+    cacheSeconds: 15,
   },
   {
-    sort: 'latest',
-    heading: 'Explore',
-    subheading: 'Everything published recently, newest first.',
+    sort: 'foryou',
+    heading: 'For you',
+    subheading: 'A blend of what you follow and what the community is reading.',
     path: '/explore',
     navKey: 'explore',
-    tabKey: 'latest',
+    tabKey: 'foryou',
     cacheSeconds: 30,
   },
   {
@@ -135,6 +135,9 @@ for (const feed of FEEDS) {
         viewer,
         cursor: cursorOf(c),
         limit: limitOf(c),
+        ...(feed.sort === 'trending' && (c.req.query('window') === 'day' || c.req.query('window') === 'week')
+          ? { window: c.req.query('window') as 'day' | 'week' }
+          : {}),
       }),
       categoryOptions(c).catch(() => [] as { slug: string; name: string }[]),
       defaultRail(c),
@@ -145,7 +148,9 @@ for (const feed of FEEDS) {
       subheading: feed.subheading,
       page,
       baseHref: feed.path,
-      loadMoreEndpoint: `/api/posts?sort=${feed.sort}`,
+      loadMoreEndpoint: `/api/posts?sort=${feed.sort}${
+        feed.sort === 'trending' && c.req.query('window') ? `&window=${c.req.query('window')}` : ''
+      }`,
       activeTab: feed.tabKey,
       signedIn: !!viewer,
       ...(viewer ? { composer: composer(c.get('csrfToken') ?? null, categories) } : {}),
@@ -239,7 +244,7 @@ pages.get('/tag/:slug', readLimit(), async (c) => {
     },
     body: renderFeedPage({
       heading: `#${slug}`,
-      subheading: 'Everything tagged with this hashtag.',
+      subheading: 'Everything tagged with this hashtag. Follow it to surface these posts in Topics.',
       page,
       baseHref: `/tag/${slug}`,
       loadMoreEndpoint: `/api/posts?sort=latest&tag=${encodeURIComponent(slug)}`,
@@ -607,6 +612,80 @@ pages.get('/settings', requireAuth(), async (c) => {
       theme: readTheme(c.req.raw),
     }),
   });
+});
+
+pages.get('/topics', requireAuth(), readLimit(), async (c) => {
+  const viewer = requireUser(c.get('user'));
+  const page = await new PostService(serviceContext(c)).feed({
+    sort: 'latest',
+    viewer,
+    cursor: cursorOf(c),
+    limit: limitOf(c),
+    followedTagsOnly: true,
+  });
+  return renderPage(c, {
+    meta: { title: 'Topics', noindex: true },
+    body: renderFeedPage({
+      heading: 'Followed topics',
+      subheading: 'Posts from hashtags you follow.',
+      page,
+      baseHref: '/topics',
+      loadMoreEndpoint: '/api/posts?sort=latest&tags=followed',
+      activeTab: '',
+      showTabs: false,
+      signedIn: true,
+      emptyTitle: 'No followed tags yet',
+      emptyBody: 'Open a #tag page and follow it.',
+    }),
+    active: 'topics',
+  });
+});
+
+pages.get('/messages', requireAuth(), async (c) => {
+  const viewer = requireUser(c.get('user'));
+  const items = await serviceContext(c).repos.extras.listConversations(viewer.id);
+  const body = `
+    <div class="pagehead"><h1 class="pagehead__title">Messages</h1></div>
+    <form class="composer" method="post" action="/api/community/messages" data-settings-form>
+      <input type="hidden" name="_csrf" value="${c.get('csrfToken') ?? ''}">
+      <input name="username" type="text" required placeholder="username" maxlength="24">
+      <textarea name="content" required maxlength="4000" placeholder="Write a DM…"></textarea>
+      <button class="btn btn--primary" type="submit">Send</button>
+    </form>
+    <ul class="peoplelist">
+      ${items
+        .map(
+          (row) => `
+        <li class="peoplelist__item">
+          <div>
+            <a class="peoplelist__name" href="/messages/${row.id}">${escapeText(row.peer_display_name || row.peer_username)}</a>
+            <p class="muted">@${escapeText(row.peer_username)} · ${escapeText(row.last_content || '')}</p>
+          </div>
+        </li>`,
+        )
+        .join('')}
+    </ul>`;
+  return renderPage(c, { meta: { title: 'Messages', noindex: true }, body, active: 'messages' });
+});
+
+pages.get('/messages/:id', requireAuth(), async (c) => {
+  const viewer = requireUser(c.get('user'));
+  const id = c.req.param('id');
+  if (!(await serviceContext(c).repos.extras.isMember(id, viewer.id))) {
+    throw AppError.forbidden('Not in this conversation');
+  }
+  const msgs = await serviceContext(c).repos.extras.listMessages(id);
+  const body = `
+    <div class="pagehead"><h1 class="pagehead__title">Conversation</h1></div>
+    <ol class="comment__list">
+      ${msgs
+        .map(
+          (m) => `<li class="comment"><strong>@${escapeText(m.username)}</strong>
+          <div class="prose prose--sm">${escapeText(m.content)}</div></li>`,
+        )
+        .join('')}
+    </ol>`;
+  return renderPage(c, { meta: { title: 'Conversation', noindex: true }, body, active: 'messages' });
 });
 
 pages.get('/compose', requireAuth(), async (c) => {

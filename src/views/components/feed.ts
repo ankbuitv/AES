@@ -49,9 +49,15 @@ export function feedList(input: FeedListInput): string {
   }
 
   const separator = input.baseHref.includes('?') ? '&' : '?';
+  const newestAt = input.page.items[0]?.createdAt ?? 0;
 
   return html`
-    <div class="feed" data-feed data-endpoint="${input.loadMoreEndpoint}">
+    <div class="feed-live">
+      <button type="button" class="feed-live__btn is-hidden" data-new-posts hidden>
+        New posts
+      </button>
+    </div>
+    <div class="feed" data-feed data-endpoint="${input.loadMoreEndpoint}" data-newest="${newestAt}">
       ${input.page.items.map((post) => raw(postCard(post)))}
     </div>
     ${input.page.nextCursor

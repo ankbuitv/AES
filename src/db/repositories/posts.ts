@@ -41,7 +41,7 @@ const POST_SELECT = `
 
 const POST_JOINS = `
   FROM posts p
-  JOIN users u ON u.id = p.author_id
+  LEFT JOIN users u ON u.id = p.author_id
   LEFT JOIN categories c ON c.id = p.category_id
 `;
 
@@ -55,6 +55,10 @@ export interface FeedOptions {
   categorySlug?: string;
   tagSlug?: string;
   authorId?: string;
+  /** Only posts newer than this unix timestamp (used for live "new posts" polls). */
+  since?: number;
+  excludeIds?: string[];
+  sinceWindow?: number;
 }
 
 export class PostRepository {
@@ -175,6 +179,60 @@ export class PostRepository {
     ]);
   }
 
+  async hardDelete(id: string): Promise<void> {
+    await this.db.run('DELETE FROM posts WHERE id = ?', [id]);
+  }
+
+  async setPinned(id: string, pinnedAt: number | null): Promise<void> {
+    await this.db.run('UPDATE posts SET pinned_at = ?, updated_at = ? WHERE id = ?', [
+      pinnedAt,
+      now(),
+      id,
+    ]);
+  }
+
+  async countPinned(authorId?: string): Promise<number> {
+    if (authorId) {
+      return (
+        (await this.db.scalar<number>(
+          `SELECT COUNT(*) FROM posts WHERE author_id = ? AND pinned_at IS NOT NULL AND status = 'published'`,
+          [authorId],
+        )) ?? 0
+      );
+    }
+    return (
+      (await this.db.scalar<number>(
+        `SELECT COUNT(*) FROM posts WHERE pinned_at IS NOT NULL AND status = 'published' AND visibility = 'public'`,
+      )) ?? 0
+    );
+  }
+
+  async listPinned(options: {
+    viewerId: string | null;
+    limit: number;
+    authorId?: string;
+  }): Promise<PostWithAuthor[]> {
+    const where: string[] = [`u.status = 'active'`, 'p.pinned_at IS NOT NULL', `p.status = 'published'`];
+    const params: (string | number)[] = [];
+
+    const visibility = this.visibilityClause(options.viewerId);
+    where.push(visibility.sql);
+    params.push(...visibility.params);
+
+    if (options.authorId) {
+      where.push('p.author_id = ?');
+      params.push(options.authorId);
+    }
+
+    return this.db.all<PostWithAuthor>(
+      `SELECT ${POST_SELECT} ${POST_JOINS}
+       WHERE ${where.join(' AND ')}
+       ORDER BY p.pinned_at DESC, p.id DESC
+       LIMIT ?`,
+      [...params, options.limit],
+    );
+  }
+
   // --- Feeds ----------------------------------------------------------------
 
   /**
@@ -182,19 +240,29 @@ export class PostRepository {
    * A viewer sees: public posts, their own posts (any visibility), and
    * followers-only posts by people they follow. Blocked users are excluded.
    */
+  private publicPostSql(): string {
+    return `(
+      COALESCE(p.status, 'published') IN ('published', '')
+      AND COALESCE(p.visibility, 'public') IN ('public', '')
+    )`;
+  }
+
   private visibilityClause(viewerId: string | null): { sql: string; params: (string | number)[] } {
+    const publicPost = this.publicPostSql();
     if (!viewerId) {
-      return { sql: `p.status = 'published' AND p.visibility = 'public'`, params: [] };
+      return { sql: publicPost, params: [] };
     }
     return {
       sql: `(
         p.author_id = ?
         OR (
-          p.status = 'published'
-          AND (
-            p.visibility = 'public'
-            OR (p.visibility = 'followers'
-                AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.following_id = p.author_id))
+          (
+            ${publicPost}
+            OR (
+              p.status = 'published'
+              AND p.visibility = 'followers'
+              AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.following_id = p.author_id)
+            )
           )
           AND NOT EXISTS (
             SELECT 1 FROM blocks b
@@ -209,7 +277,7 @@ export class PostRepository {
 
   async feed(options: FeedOptions): Promise<PostWithAuthor[]> {
     const { viewerId, cursor, limit, sort } = options;
-    const where: string[] = [`u.status = 'active'`];
+    const where: string[] = [`(u.id IS NULL OR COALESCE(u.status, 'active') NOT IN ('deleted', 'banned'))`];
     const params: (string | number)[] = [];
 
     const visibility = this.visibilityClause(viewerId);
@@ -217,7 +285,7 @@ export class PostRepository {
     params.push(...visibility.params);
 
     // Only the author sees their own drafts inside a feed.
-    if (viewerId) where.push(`(p.status = 'published' OR p.author_id = ?)`);
+    if (viewerId) where.push(`(COALESCE(p.status, 'published') IN ('published', '') OR p.author_id = ?)`);
     if (viewerId) params.push(viewerId);
 
     let joins = POST_JOINS;
@@ -234,6 +302,14 @@ export class PostRepository {
     if (options.authorId) {
       where.push('p.author_id = ?');
       params.push(options.authorId);
+    }
+    if (options.since && options.since > 0) {
+      where.push('p.created_at > ?');
+      params.push(options.since);
+    }
+    if (options.excludeIds?.length) {
+      where.push(`p.id NOT IN (${placeholders(options.excludeIds.length)})`);
+      params.push(...options.excludeIds);
     }
 
     if (sort === 'following') {
@@ -299,6 +375,10 @@ export class PostRepository {
 
     if (options.mediaOnly) {
       where.push('EXISTS (SELECT 1 FROM post_media pm WHERE pm.post_id = p.id)');
+    }
+    if (options.excludeIds?.length) {
+      where.push(`p.id NOT IN (${placeholders(options.excludeIds.length)})`);
+      params.push(...options.excludeIds);
     }
 
     if (options.cursor) {
