@@ -1,0 +1,22 @@
+{
+  // The browser bundle is a different runtime from the Worker: it needs the
+  // DOM lib and must NOT see @cloudflare/workers-types (whose `fetch`/Request
+  // signatures differ). Kept as a separate project so both are type-checked
+  // with the right globals.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": [],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["**/*.ts"]
+}

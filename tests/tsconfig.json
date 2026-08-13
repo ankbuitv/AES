@@ -1,0 +1,12 @@
+{
+  // Tests run under Node (vitest) but drive Worker code, so they need BOTH
+  // sets of globals: node:sqlite/node:fs for the harness and the Workers
+  // runtime types the application is written against.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "@cloudflare/workers-types"],
+    "noEmit": true
+  },
+  "include": ["**/*.ts", "../src/**/*.ts", "../worker/**/*.ts"],
+  "exclude": ["../src/client/**"]
+}
