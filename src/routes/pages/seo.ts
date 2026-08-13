@@ -63,7 +63,7 @@ seo.get('/sitemap.xml', async (c) => {
     ctx.repos.tags.listPopular(200),
   ]);
 
-  const staticPaths = ['/', '/explore', '/trending', '/leaderboard'];
+  const staticPaths = ['/', '/explore', '/trending', '/leaderboard', '/status'];
 
   const urls = [
     ...staticPaths.map(

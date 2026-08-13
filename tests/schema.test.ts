@@ -39,6 +39,28 @@ describe('bundled migrations', () => {
     expect(categories.n).toBeGreaterThan(0);
   });
 
+  it('normalises bundled SQL for D1 exec rather than sending formatting lines as queries', async () => {
+    const db = createEmptyDatabase();
+    const submitted: string[] = [];
+    // Remote D1 exec treats newlines as query separators and rejects leading
+    // comment-only lines. Mirror that contract around the SQLite test double.
+    const strictD1 = {
+      prepare: db.prepare.bind(db),
+      async exec(sql: string) {
+        if (sql.includes('\n') || /^\s*--/.test(sql)) {
+          throw new Error('D1 exec received a formatting line');
+        }
+        submitted.push(sql);
+        return db.exec(sql);
+      },
+    } as unknown as D1Database;
+
+    const status = await ensureSchema(strictD1);
+    expect(status.ready).toBe(true);
+    expect(submitted).toHaveLength(BUNDLED_MIGRATIONS.length);
+    expect(submitted.every((sql) => sql.startsWith('CREATE') || sql.startsWith('INSERT'))).toBe(true);
+  });
+
   it('is a no-op on a second call', async () => {
     const db = createEmptyDatabase();
     await ensureSchema(db as unknown as D1Database);

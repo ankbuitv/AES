@@ -49,6 +49,8 @@ export interface LayoutInput {
   aside?: string;
   /** Bootstrap data serialised into `window.__AES__`. */
   bootstrap?: Record<string, unknown>;
+  /** Focused, full-width chrome for the public service status dashboard. */
+  variant?: 'app' | 'status';
 }
 
 interface NavItem {
@@ -69,6 +71,7 @@ const NAV: readonly NavItem[] = [
   { key: 'bookmarks', href: '/bookmarks', label: 'Bookmarks', icon: 'bookmark', auth: true, group: 'library' },
   { key: 'notifications', href: '/notifications', label: 'Notifications', icon: 'bell', auth: true, group: 'library' },
   { key: 'about', href: '/about', label: 'About', icon: 'info', group: 'legal' },
+  { key: 'status', href: '/status', label: 'Status', icon: 'activity', group: 'legal' },
   { key: 'terms', href: '/terms', label: 'Terms', icon: 'file', group: 'legal' },
   { key: 'privacy', href: '/privacy', label: 'Privacy', icon: 'shield', group: 'legal' },
 ];
@@ -96,6 +99,7 @@ const ICONS: Record<string, string> = {
   comment: '<path d="M5 6.5h14v9.5H9l-4 3z"/>',
   share: '<path d="M12 4v10"/><path d="m8 8 4-4 4 4"/><path d="M6 14v5h12v-5"/>',
   heart: '<path d="M12 20s-7-4.4-7-9.2A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.8C19 15.6 12 20 12 20z"/>',
+  activity: '<path d="M3 12h4l2.3-6 4.1 12 2.2-6H21"/>',
 };
 
 export function icon(name: string, className = 'ico'): RawHtml {
@@ -135,6 +139,7 @@ export function renderLayout(input: LayoutInput): string {
   const image = meta.image ?? `${input.origin}/og-default.svg`;
   const themeClass = input.theme === 'system' ? '' : input.theme;
   const unread = input.unreadCount ?? 0;
+  const statusVariant = input.variant === 'status';
 
   const visible = NAV.filter((item) => !item.auth || !!user);
   const primary = visible.filter((item) => item.group === 'primary');
@@ -190,90 +195,110 @@ export function renderLayout(input: LayoutInput): string {
   ${jsonLd}
   <script nonce="${input.nonce}">${raw(THEME_BOOT)}</script>
 </head>
-<body>
+<body class="${statusVariant ? 'status-body' : ''}">
   <a class="skip-link" href="#main">Skip to main content</a>
 
-  <header class="topbar" role="banner">
-    <div class="topbar__inner">
+  <header class="topbar ${statusVariant ? 'status-topbar' : ''}" role="banner">
+    <div class="topbar__inner ${statusVariant ? 'topbar__inner--status' : ''}">
       ${brand(input.siteName)}
 
-      <form class="topsearch" role="search" action="/search" method="get">
-        <label class="sr-only" for="q">Search ${input.siteName}</label>
-        ${icon('search', 'ico topsearch__ico')}
-        <input id="q" name="q" type="search" placeholder="Search posts, people, tags" autocomplete="off"
-               maxlength="100" enterkeyhint="search">
-      </form>
+      ${statusVariant
+        ? raw(html`
+          <span class="status-brand-label">Status</span>
+          <nav class="status-topnav" aria-label="Status page">
+            <a class="btn btn--ghost btn--small" href="/health">Health JSON</a>
+            <a class="btn btn--ghost btn--small" href="/">View site</a>
+            <button class="topnav__link theme-toggle" type="button" data-theme-toggle aria-label="Switch colour theme">
+              ${icon('sun', 'ico theme-toggle__sun')}
+              ${icon('moon', 'ico theme-toggle__moon')}
+            </button>
+          </nav>`)
+        : raw(html`
+          <form class="topsearch" role="search" action="/search" method="get">
+            <label class="sr-only" for="q">Search ${input.siteName}</label>
+            ${icon('search', 'ico topsearch__ico')}
+            <input id="q" name="q" type="search" placeholder="Search posts, people, tags" autocomplete="off"
+                   maxlength="100" enterkeyhint="search">
+          </form>
 
-      <nav class="headnav" aria-label="Primary">
-        ${HEADER_NAV.map(
-          (item) =>
-            raw(html`<a class="headnav__link ${input.active === item.key ? 'is-active' : ''}" href="${item.href}"
-               ${input.active === item.key ? raw('aria-current="page"') : ''}>${item.label}</a>`),
-        )}
-      </nav>
+          <nav class="headnav" aria-label="Primary">
+            ${HEADER_NAV.map(
+              (item) =>
+                raw(html`<a class="headnav__link ${input.active === item.key ? 'is-active' : ''}" href="${item.href}"
+                   ${input.active === item.key ? raw('aria-current="page"') : ''}>${item.label}</a>`),
+            )}
+          </nav>
 
-      <nav class="topnav" aria-label="Account">
-        <a class="topnav__link topnav__search" href="/search" aria-label="Search">
-          ${icon('search')}
-        </a>
-        ${user
-          ? raw(html`
-            <a class="topnav__link" href="/notifications" aria-label="Notifications${unread ? ` (${unread} unread)` : ''}">
-              ${icon('bell')}
-              ${unread
-                ? raw(html`<span class="badge-count" data-unread-badge>${unread > 99 ? '99+' : unread}</span>`)
-                : raw('<span class="badge-count is-hidden" data-unread-badge hidden></span>')}
+          <nav class="topnav" aria-label="Account">
+            <a class="topnav__link topnav__search" href="/search" aria-label="Search">
+              ${icon('search')}
             </a>
-            <a class="topnav__link" href="/settings" aria-label="Settings">${icon('settings')}</a>
-            <a class="avatar avatar--sm topnav__avatar" href="/u/${user.username}" aria-label="Your profile">
-              ${avatarChip(user)}
-            </a>`)
-          : raw(html`
-            <a class="btn btn--ghost btn--small topnav__signin" href="/login">Sign in</a>
-            <a class="btn btn--primary btn--small" href="/register">Join</a>`)}
-        <button class="topnav__link theme-toggle" type="button" data-theme-toggle aria-label="Switch colour theme">
-          ${icon('sun', 'ico theme-toggle__sun')}
-          ${icon('moon', 'ico theme-toggle__moon')}
-        </button>
-      </nav>
+            ${user
+              ? raw(html`
+                <a class="topnav__link" href="/notifications" aria-label="Notifications${unread ? ` (${unread} unread)` : ''}">
+                  ${icon('bell')}
+                  ${unread
+                    ? raw(html`<span class="badge-count" data-unread-badge>${unread > 99 ? '99+' : unread}</span>`)
+                    : raw('<span class="badge-count is-hidden" data-unread-badge hidden></span>')}
+                </a>
+                <a class="topnav__link" href="/settings" aria-label="Settings">${icon('settings')}</a>
+                <a class="avatar avatar--sm topnav__avatar" href="/u/${user.username}" aria-label="Your profile">
+                  ${avatarChip(user)}
+                </a>`)
+              : raw(html`
+                <a class="btn btn--ghost btn--small topnav__signin" href="/login">Sign in</a>
+                <a class="btn btn--primary btn--small" href="/register">Join</a>`)}
+            <button class="topnav__link theme-toggle" type="button" data-theme-toggle aria-label="Switch colour theme">
+              ${icon('sun', 'ico theme-toggle__sun')}
+              ${icon('moon', 'ico theme-toggle__moon')}
+            </button>
+          </nav>`)}
     </div>
   </header>
 
-  <div class="shell">
-    <nav class="sidenav" aria-label="Primary">
-      <ul class="sidenav__list">
-        ${primary.map((item) => navLink(item, input.active))}
-      </ul>
-      ${library.length
-        ? raw(html`
-            <hr class="sidenav__rule" />
-            <ul class="sidenav__list">
-              ${library.map((item) => navLink(item, input.active))}
-            </ul>`)
-        : ''}
-      <hr class="sidenav__rule" />
-      <ul class="sidenav__list sidenav__list--legal">
-        ${legal.map((item) => navLink(item, input.active))}
-        ${user && (user.role === 'admin' || user.role === 'moderator')
-          ? raw(html`<li>
-              <a class="sidenav__link ${input.active === 'admin' ? 'is-active' : ''}" href="/admin"
-                 ${input.active === 'admin' ? raw('aria-current="page"') : ''}>
-                ${icon('shield')}<span>Moderation</span>
-              </a>
-            </li>`)
-          : ''}
-      </ul>
-      ${user
-        ? raw(html`<a class="btn btn--primary btn--block sidenav__cta" href="/compose">${icon('plus')} New post</a>`)
-        : raw(html`<a class="btn btn--primary btn--block sidenav__cta" href="/register">Join AES</a>`)}
-    </nav>
+  ${statusVariant
+    ? raw(html`
+      <div class="status-shell">
+        <main id="main" class="status-main" role="main" tabindex="-1">
+          ${raw(input.body)}
+        </main>
+      </div>`)
+    : raw(html`
+      <div class="shell">
+        <nav class="sidenav" aria-label="Primary">
+          <ul class="sidenav__list">
+            ${primary.map((item) => navLink(item, input.active))}
+          </ul>
+          ${library.length
+            ? raw(html`
+                <hr class="sidenav__rule" />
+                <ul class="sidenav__list">
+                  ${library.map((item) => navLink(item, input.active))}
+                </ul>`)
+            : ''}
+          <hr class="sidenav__rule" />
+          <ul class="sidenav__list sidenav__list--legal">
+            ${legal.map((item) => navLink(item, input.active))}
+            ${user && (user.role === 'admin' || user.role === 'moderator')
+              ? raw(html`<li>
+                  <a class="sidenav__link ${input.active === 'admin' ? 'is-active' : ''}" href="/admin"
+                     ${input.active === 'admin' ? raw('aria-current="page"') : ''}>
+                    ${icon('shield')}<span>Moderation</span>
+                  </a>
+                </li>`)
+              : ''}
+          </ul>
+          ${user
+            ? raw(html`<a class="btn btn--primary btn--block sidenav__cta" href="/compose">${icon('plus')} New post</a>`)
+            : raw(html`<a class="btn btn--primary btn--block sidenav__cta" href="/register">Join AES</a>`)}
+        </nav>
 
-    <main id="main" class="main" role="main" tabindex="-1">
-      ${raw(input.body)}
-    </main>
+        <main id="main" class="main" role="main" tabindex="-1">
+          ${raw(input.body)}
+        </main>
 
-    ${input.aside ? raw(html`<aside class="rail" aria-label="Discover">${raw(input.aside)}</aside>`) : ''}
-  </div>
+        ${input.aside ? raw(html`<aside class="rail" aria-label="Discover">${raw(input.aside)}</aside>`) : ''}
+      </div>`)}
 
   <div class="toaster" data-toaster aria-live="polite" aria-atomic="true"></div>
 

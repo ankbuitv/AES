@@ -675,6 +675,157 @@ async function submitAvatarForm(form: HTMLFormElement): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Public status dashboard
+// ---------------------------------------------------------------------------
+
+type LiveHealthState = 'ok' | 'error' | 'missing';
+
+interface LiveHealthReport {
+  status: 'ok';
+  readiness: 'ready' | 'degraded' | 'not_ready';
+  checks: {
+    database: 'ok' | 'error';
+    storage: 'ok' | 'error';
+    schema: LiveHealthState;
+  };
+  schema: { ready: boolean; applied: number; pending: number };
+  latencyMs: { database: number; storage: number; schema: number; total: number };
+  timestamp: string;
+}
+
+function liveStatusLabel(state: LiveHealthState): string {
+  if (state === 'ok') return 'Operational';
+  if (state === 'missing') return 'Migration required';
+  return 'Unavailable';
+}
+
+function updateStatusComponent(
+  key: 'edge' | 'database' | 'storage' | 'schema',
+  state: LiveHealthState,
+  latency: number,
+  report: LiveHealthReport,
+): void {
+  const row = $<HTMLElement>(`[data-status-component="${key}"]`);
+  if (!row) return;
+
+  const operational = state === 'ok';
+  row.classList.toggle('status-component--operational', operational);
+  row.classList.toggle('status-component--outage', !operational);
+
+  const badge = $<HTMLElement>('[data-status-badge]', row);
+  if (badge) {
+    badge.textContent = liveStatusLabel(state);
+    badge.classList.toggle('status-badge--operational', operational);
+    badge.classList.toggle('status-badge--outage', !operational);
+  }
+
+  const latencyNode = $<HTMLElement>('[data-status-latency]', row);
+  if (latencyNode) latencyNode.textContent = `${Math.max(0, Math.round(latency))} ms`;
+
+  const description = $<HTMLElement>('[data-status-description]', row);
+  if (!description) return;
+  if (key === 'edge') {
+    description.textContent = 'The status page and Worker are responding.';
+  } else if (key === 'database') {
+    description.textContent = operational
+      ? 'Queries are responding normally.'
+      : 'Posts, accounts and other data may be unavailable.';
+  } else if (key === 'storage') {
+    description.textContent = operational
+      ? 'Uploads and media delivery are available.'
+      : 'Uploads and media delivery may be unavailable.';
+  } else if (state === 'ok') {
+    const total = report.schema.applied + report.schema.pending;
+    description.textContent = `${report.schema.applied} of ${total} migrations applied.`;
+  } else if (state === 'missing') {
+    description.textContent = `${report.schema.pending} database migration${report.schema.pending === 1 ? '' : 's'} pending.`;
+  } else {
+    description.textContent = 'The application schema is incomplete or unavailable.';
+  }
+}
+
+function updateStatusDashboard(report: LiveHealthReport): void {
+  const page = $<HTMLElement>('[data-status-page]');
+  const overall = $<HTMLElement>('[data-status-overall]');
+  if (!page || !overall) return;
+
+  const state = report.readiness === 'ready' ? 'operational' : report.readiness === 'degraded' ? 'degraded' : 'outage';
+  page.dataset.overall = state;
+  for (const candidate of ['operational', 'degraded', 'outage']) {
+    overall.classList.toggle(`status-overall--${candidate}`, candidate === state);
+  }
+
+  const title = $<HTMLElement>('[data-status-overall-title]', overall);
+  const body = $<HTMLElement>('[data-status-overall-body]', overall);
+  if (state === 'operational') {
+    if (title) title.textContent = 'All systems operational';
+    if (body) body.textContent = 'AES is running normally.';
+  } else if (state === 'degraded') {
+    if (title) title.textContent = 'Degraded service';
+    if (body) body.textContent = 'The site is online, but some features may be temporarily unavailable.';
+  } else {
+    if (title) title.textContent = 'Major service outage';
+    if (body) body.textContent = 'One or more core systems are unavailable. We are investigating.';
+  }
+
+  updateStatusComponent('edge', 'ok', report.latencyMs.total, report);
+  updateStatusComponent('database', report.checks.database, report.latencyMs.database, report);
+  updateStatusComponent('storage', report.checks.storage, report.latencyMs.storage, report);
+  updateStatusComponent('schema', report.checks.schema, report.latencyMs.schema, report);
+
+  const checked = $<HTMLTimeElement>('[data-status-checked]');
+  if (checked) {
+    checked.dateTime = report.timestamp;
+    const parsed = new Date(report.timestamp);
+    checked.textContent = Number.isNaN(parsed.getTime())
+      ? report.timestamp
+      : `${parsed.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })}`;
+  }
+}
+
+async function refreshStatusDashboard(): Promise<void> {
+  const button = $<HTMLButtonElement>('[data-status-refresh]');
+  if (button) {
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+  }
+
+  try {
+    const response = await fetch('/health', {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'same-origin',
+    });
+    if (!response.ok) throw new Error('Health endpoint unavailable');
+    updateStatusDashboard((await response.json()) as LiveHealthReport);
+  } catch {
+    const overall = $<HTMLElement>('[data-status-overall]');
+    if (overall) {
+      overall.classList.remove('status-overall--operational', 'status-overall--degraded');
+      overall.classList.add('status-overall--outage');
+      const title = $<HTMLElement>('[data-status-overall-title]', overall);
+      const body = $<HTMLElement>('[data-status-overall-body]', overall);
+      if (title) title.textContent = 'Unable to refresh status';
+      if (body) body.textContent = 'The live health endpoint did not respond. This page may be out of date.';
+    }
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
+  }
+}
+
+function initStatusDashboard(): void {
+  if (!$('[data-status-page]')) return;
+  const button = $<HTMLButtonElement>('[data-status-refresh]');
+  button?.addEventListener('click', () => void refreshStatusDashboard());
+  window.setInterval(() => {
+    if (!document.hidden) void refreshStatusDashboard();
+  }, 60_000);
+}
+
+// ---------------------------------------------------------------------------
 // Notifications badge
 // ---------------------------------------------------------------------------
 
@@ -818,6 +969,7 @@ function init(): void {
   initDelegatedClicks();
   initForms();
   initNotifications();
+  initStatusDashboard();
 }
 
 if (document.readyState === 'loading') {

@@ -22,6 +22,8 @@ export interface PageOptions {
   aside?: string;
   active?: string;
   bootstrap?: Record<string, unknown>;
+  /** Status pages use a focused, full-width shell without the social rails. */
+  layout?: 'app' | 'status';
   status?: number;
   /** Seconds of shared-cache TTL. Only ever set for anonymous, public pages. */
   cacheSeconds?: number;
@@ -62,6 +64,7 @@ export async function renderPage(c: Context<AppContext>, options: PageOptions): 
     body: options.body,
     ...(options.aside ? { aside: options.aside } : {}),
     ...(options.bootstrap ? { bootstrap: options.bootstrap } : {}),
+    ...(options.layout ? { variant: options.layout } : {}),
   });
 
   // Private pages must never land in a shared cache. Anonymous public pages

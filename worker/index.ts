@@ -31,10 +31,10 @@ import seo from '../src/routes/pages/seo';
 import staticPages from '../src/routes/pages/static';
 import { buildServiceContext } from '../src/services/context';
 import { runScheduled } from '../src/services/jobs';
-import { checkStorageHealth } from '../src/services/storageFactory';
-import { checkSchema, ensureSchema } from '../src/db/schema';
+import { collectHealthReport } from '../src/services/health';
+import { recordStatusSnapshot } from '../src/services/statusHistory';
+import { ensureSchema } from '../src/db/schema';
 import { randomToken } from '../src/utils/id';
-import { getConfig } from '../src/config';
 
 const app = new Hono<AppContext>();
 
@@ -51,41 +51,9 @@ app.use('*', requestContext(), securityHeaders(), sessionMiddleware());
  * visible without taking the endpoint down (and without leaking any config).
  */
 app.get('/health', async (c) => {
-  const config = getConfig(c.env);
-  const ctx = buildServiceContext({
-    env: c.env,
-    request: c.req.raw,
-    requestId: c.get('requestId') ?? randomToken(8),
-  });
-
-  // Apply pending migrations before probing so a freshly-created D1 becomes
-  // usable on the first health check after deploy.
-  const schemaApply = await ensureSchema(c.env.DB).catch(() => null);
-
-  const [db, storage, schema] = await Promise.all([
-    ctx.repos.db
-      .scalar<number>('SELECT 1')
-      .then(() => 'ok' as const)
-      .catch(() => 'error' as const),
-    checkStorageHealth(c.env)
-      .then((result) => (result.ok ? ('ok' as const) : ('error' as const)))
-      .catch(() => 'error' as const),
-    checkSchema(c.env.DB)
-      .then((result) => result.status)
-      .catch(() => 'error' as const),
-  ]);
-
+  const report = await collectHealthReport(c.env);
   c.header('cache-control', 'no-store');
-  return c.json({
-    status: 'ok',
-    environment: config.environment,
-    version: 1,
-    checks: { database: db, storage, schema },
-    schema: schemaApply
-      ? { ready: schemaApply.ready, applied: schemaApply.applied.length, pending: schemaApply.pending.length }
-      : undefined,
-    timestamp: new Date().toISOString(),
-  });
+  return c.json(report);
 });
 
 app.route('/api', api);
@@ -115,7 +83,17 @@ export default {
 
     ctx.waitUntil(
       ensureSchema(env.DB)
-        .then(() => runScheduled(serviceCtx, event.cron))
+        .then(async () => {
+          const health = await collectHealthReport(env);
+          await Promise.all([
+            runScheduled(serviceCtx, event.cron),
+            recordStatusSnapshot(env, health).catch((error: unknown) => {
+              serviceCtx.logger.warn('status_history_failed', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }),
+          ]);
+        })
         .catch((error: unknown) => {
           serviceCtx.logger.error('scheduled_failed', {
             cron: event.cron,
