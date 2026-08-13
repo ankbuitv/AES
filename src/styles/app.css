@@ -2122,6 +2122,11 @@ textarea {
   background: var(--danger-soft);
 }
 
+.status-badge--missing {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--border-strong) 30%, transparent);
+}
+
 .status-latency {
   font-family: var(--font-mono);
   font-size: 0.7rem;

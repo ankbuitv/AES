@@ -99,7 +99,13 @@ function components(report: HealthReport): ComponentDefinition[] {
       description:
         report.checks.storage === 'ok'
           ? 'Uploads and media delivery are available.'
-          : 'Uploads and media delivery may be unavailable.',
+          : report.checks.storage === 'missing'
+            ? report.storageError
+              ? `Object storage is not configured (${report.storageError}).`
+              : 'Object storage is not configured — uploads and media delivery are disabled.'
+            : report.storageError
+              ? `Uploads and media delivery are unavailable (${report.storageError}).`
+              : 'Uploads and media delivery may be unavailable.',
       latency: report.latencyMs.storage,
     },
     {
@@ -114,7 +120,7 @@ function components(report: HealthReport): ComponentDefinition[] {
 
 function statusLabel(state: HealthCheckState): string {
   if (state === 'ok') return 'Operational';
-  if (state === 'missing') return 'Migration required';
+  if (state === 'missing') return 'Not configured';
   return 'Unavailable';
 }
 
@@ -189,7 +195,8 @@ function componentRow(
   history: StatusHistory,
   component: ComponentDefinition,
 ): string {
-  const kind = component.state === 'ok' ? 'operational' : 'outage';
+  const kind =
+    component.state === 'ok' ? 'operational' : component.state === 'missing' ? 'missing' : 'outage';
   return html`
     <article class="status-component status-component--${kind}" data-status-component="${component.key}">
       <div class="status-component__head">

@@ -685,17 +685,18 @@ interface LiveHealthReport {
   readiness: 'ready' | 'degraded' | 'not_ready';
   checks: {
     database: 'ok' | 'error';
-    storage: 'ok' | 'error';
+    storage: LiveHealthState;
     schema: LiveHealthState;
   };
+  storageError?: string;
   schema: { ready: boolean; applied: number; pending: number };
   latencyMs: { database: number; storage: number; schema: number; total: number };
   timestamp: string;
 }
 
-function liveStatusLabel(state: LiveHealthState): string {
+function liveStatusLabel(state: LiveHealthState, key: 'edge' | 'database' | 'storage' | 'schema'): string {
   if (state === 'ok') return 'Operational';
-  if (state === 'missing') return 'Migration required';
+  if (state === 'missing') return key === 'storage' ? 'Not configured' : 'Migration required';
   return 'Unavailable';
 }
 
@@ -709,14 +710,16 @@ function updateStatusComponent(
   if (!row) return;
 
   const operational = state === 'ok';
+  const missing = state === 'missing';
   row.classList.toggle('status-component--operational', operational);
-  row.classList.toggle('status-component--outage', !operational);
+  row.classList.toggle('status-component--outage', !operational && !missing);
 
   const badge = $<HTMLElement>('[data-status-badge]', row);
   if (badge) {
-    badge.textContent = liveStatusLabel(state);
+    badge.textContent = liveStatusLabel(state, key);
     badge.classList.toggle('status-badge--operational', operational);
-    badge.classList.toggle('status-badge--outage', !operational);
+    badge.classList.toggle('status-badge--outage', !operational && !missing);
+    badge.classList.toggle('status-badge--missing', missing);
   }
 
   const latencyNode = $<HTMLElement>('[data-status-latency]', row);
@@ -733,7 +736,13 @@ function updateStatusComponent(
   } else if (key === 'storage') {
     description.textContent = operational
       ? 'Uploads and media delivery are available.'
-      : 'Uploads and media delivery may be unavailable.';
+      : state === 'missing'
+        ? report.storageError
+          ? `Object storage is not configured (${report.storageError}).`
+          : 'Object storage is not configured — uploads and media delivery are disabled.'
+        : report.storageError
+          ? `Uploads and media delivery are unavailable (${report.storageError}).`
+          : 'Uploads and media delivery may be unavailable.';
   } else if (state === 'ok') {
     const total = report.schema.applied + report.schema.pending;
     description.textContent = `${report.schema.applied} of ${total} migrations applied.`;

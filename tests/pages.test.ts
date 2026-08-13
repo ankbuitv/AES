@@ -83,6 +83,20 @@ describe('server-side rendering', () => {
     expect(body).not.toContain('class="sidenav"');
   });
 
+  it('shows "Not configured" with the reason when object storage is unconfigured', async () => {
+    const client = new TestClient();
+    const bindings = client.env.bindings as unknown as Record<string, unknown>;
+    bindings.STORAGE_PROVIDER = 'b2';
+    delete bindings.MEDIA_BUCKET;
+
+    const { response, body } = await html(client, '/status');
+    expect(response.status).toBe(200);
+    expect(body).toContain('Degraded service');
+    expect(body).toContain('status-badge--missing');
+    expect(body).toContain('>Not configured<');
+    expect(body).toContain('B2 storage is not configured');
+  });
+
   it('serves the auth, search and error pages', async () => {
     const client = new TestClient();
 

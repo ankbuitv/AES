@@ -347,22 +347,19 @@ export class B2StorageProvider implements StorageProvider {
     }
   }
 
+  /**
+   * Prove credentials + bucket reachability without a known object.
+   *
+   * HEADs a probe key through the download URL. B2 answers 404/400/405 for a
+   * missing name, which `headObject` treats as success — exactly the
+   * "reachable and authorized" signal we want. This only requires the
+   * `readFiles` capability, the same one every media read already needs, so a
+   * tightly-scoped application key (no `listFiles`) cannot false-alarm the
+   * status page. The previous `b2_list_file_names` probe demanded `listFiles`
+   * and reported healthy buckets as down for such keys.
+   */
   async healthCheck(): Promise<void> {
-    await this.withAuth(async (auth) => {
-      const res = await fetch(`${auth.apiUrl}/b2api/v3/b2_list_file_names`, {
-        method: 'POST',
-        headers: {
-          Authorization: auth.authorizationToken,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ bucketId: this.config.bucketId, maxFileCount: 1 }),
-      });
-      if (res.status === 401) return RETRY;
-      if (!res.ok) {
-        throw AppError.storage('Storage health check failed', { status: res.status });
-      }
-      return true;
-    });
+    await this.headObject('health/probe');
   }
 
   // --- Signed URLs ----------------------------------------------------------
