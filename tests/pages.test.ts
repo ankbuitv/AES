@@ -71,6 +71,8 @@ describe('server-side rendering', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(body).toContain('class="status-shell"');
+    expect(body).toContain('<h1>AES Test</h1>');
+    expect(body).not.toContain('<h1>AES Test status</h1>');
     expect(body).toContain('All systems operational');
     expect(body).toContain('Website &amp; API');
     expect(body).toContain('Media storage');

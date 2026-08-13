@@ -260,7 +260,7 @@ export function renderStatusPage(input: StatusPageInput): string {
       <header class="status-hero">
         <div>
           <p class="status-eyebrow">Live service status</p>
-          <h1>${input.siteName} status</h1>
+          <h1>${input.siteName}</h1>
           <p>Current health and 90-day availability for the services behind ${input.siteName}.</p>
         </div>
         <button class="btn btn--ghost btn--small status-refresh" type="button" data-status-refresh>
