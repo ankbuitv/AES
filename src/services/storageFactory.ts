@@ -31,7 +31,15 @@ export function getStorage(env: Bindings): StorageProvider {
  * schema), so the status page can say "Not configured" instead of "Unavailable".
  */
 function notConfigured(message: string): AppError {
-  return new AppError('STORAGE_ERROR', message, { details: { reason: 'not_configured' } });
+  return new AppError('STORAGE_ERROR', message, {
+    details: { reason: 'not_configured' },
+    // This is a configuration gap, not an outage: the fix is a specific action
+    // by the operator, and the message names only environment variables (never
+    // secret values). It is already shown verbatim on the public status page,
+    // so surface it to API clients too instead of the generic "Something went
+    // wrong" they would otherwise receive for a 5xx.
+    exposeMessage: true,
+  });
 }
 
 function build(env: Bindings): StorageProvider {
