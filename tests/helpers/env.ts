@@ -76,6 +76,10 @@ export class MemoryStorage implements StorageProvider {
     this.check();
     this.objects.delete(key);
   }
+
+  async healthCheck(): Promise<void> {
+    this.check();
+  }
 }
 
 export interface TestEnv {

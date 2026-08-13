@@ -81,6 +81,11 @@ export class R2StorageProvider implements StorageProvider {
     assertSafeKey(key);
     await this.bucket.delete(key);
   }
+
+  async healthCheck(): Promise<void> {
+    // head() returns null for a missing key; a throw means the binding is dead.
+    await this.bucket.head('health/probe');
+  }
 }
 
 function parseRange(range: string): { offset: number; length?: number } | undefined {

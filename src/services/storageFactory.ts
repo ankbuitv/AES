@@ -26,24 +26,40 @@ function build(env: Bindings): StorageProvider {
 
   switch (kind) {
     case 'b2':
+      if (
+        !env.B2_APPLICATION_KEY_ID ||
+        !env.B2_APPLICATION_KEY ||
+        !env.B2_BUCKET_ID ||
+        !env.B2_BUCKET_NAME
+      ) {
+        // Production can keep STORAGE_PROVIDER=b2 in wrangler.toml while a
+        // MEDIA_BUCKET binding is present (local/preview). Prefer a working
+        // backend over a constructor throw that reports a false outage.
+        if (env.MEDIA_BUCKET) return new R2StorageProvider(env.MEDIA_BUCKET);
+        throw AppError.storage('B2 credentials are not configured');
+      }
       return new B2StorageProvider(
         {
-          applicationKeyId: env.B2_APPLICATION_KEY_ID ?? '',
-          applicationKey: env.B2_APPLICATION_KEY ?? '',
-          bucketId: env.B2_BUCKET_ID ?? '',
-          bucketName: env.B2_BUCKET_NAME ?? '',
+          applicationKeyId: env.B2_APPLICATION_KEY_ID,
+          applicationKey: env.B2_APPLICATION_KEY,
+          bucketId: env.B2_BUCKET_ID,
+          bucketName: env.B2_BUCKET_NAME,
           apiUrl: env.B2_API_URL,
         },
         env.KV,
       );
 
     case 's3':
+      if (!env.S3_ENDPOINT || !env.S3_BUCKET || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY) {
+        if (env.MEDIA_BUCKET) return new R2StorageProvider(env.MEDIA_BUCKET);
+        throw AppError.storage('S3 storage is not configured');
+      }
       return new S3StorageProvider({
-        endpoint: env.S3_ENDPOINT ?? '',
+        endpoint: env.S3_ENDPOINT,
         region: env.S3_REGION ?? 'us-east-1',
-        bucket: env.S3_BUCKET ?? '',
-        accessKeyId: env.S3_ACCESS_KEY_ID ?? '',
-        secretAccessKey: env.S3_SECRET_ACCESS_KEY ?? '',
+        bucket: env.S3_BUCKET,
+        accessKeyId: env.S3_ACCESS_KEY_ID,
+        secretAccessKey: env.S3_SECRET_ACCESS_KEY,
         forcePathStyle: true,
       });
 
@@ -64,9 +80,7 @@ export async function checkStorageHealth(
 ): Promise<{ ok: boolean; provider: string; error?: string }> {
   try {
     const storage = getStorage(env);
-    // HEAD on a key that will not exist: proves credentials + reachability
-    // without creating garbage objects.
-    await storage.headObject('.health/probe');
+    await storage.healthCheck();
     return { ok: true, provider: storage.name };
   } catch (error) {
     return {

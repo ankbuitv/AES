@@ -269,7 +269,10 @@ export class B2StorageProvider implements StorageProvider {
         headers: { Authorization: auth.authorizationToken },
       });
       if (res.status === 401) return RETRY;
-      if (res.status === 404) return null;
+      // B2 answers 404 for a missing name; some download hosts use 400
+      // (file_not_present) or refuse HEAD with 405. None of those mean the
+      // bucket is unreachable.
+      if (res.status === 404 || res.status === 400 || res.status === 405) return null;
       if (!res.ok) {
         throw AppError.storage('Could not stat object', { status: res.status });
       }
@@ -342,6 +345,24 @@ export class B2StorageProvider implements StorageProvider {
         return true;
       });
     }
+  }
+
+  async healthCheck(): Promise<void> {
+    await this.withAuth(async (auth) => {
+      const res = await fetch(`${auth.apiUrl}/b2api/v3/b2_list_file_names`, {
+        method: 'POST',
+        headers: {
+          Authorization: auth.authorizationToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ bucketId: this.config.bucketId, maxFileCount: 1 }),
+      });
+      if (res.status === 401) return RETRY;
+      if (!res.ok) {
+        throw AppError.storage('Storage health check failed', { status: res.status });
+      }
+      return true;
+    });
   }
 
   // --- Signed URLs ----------------------------------------------------------
