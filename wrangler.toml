@@ -43,13 +43,13 @@ LOG_LEVEL = "warn"
 [[d1_databases]]
 binding = "DB"
 database_name = "ank-social"
-database_id = "00000000-0000-0000-0000-000000000000" # replace after `npm run db:create`
+database_id = "bca07a72-c075-46e9-9c2f-dee4aa18fffc" # replace after `npm run db:create`
 migrations_dir = "migrations"
 
 # --- KV: rate limiting, caches, short-lived tokens --------------------------
 [[kv_namespaces]]
 binding = "KV"
-id = "00000000000000000000000000000000" # replace after `wrangler kv namespace create KV`
+id = "186a5b4976754ed5bdb42af1cd98c423" # replace after `wrangler kv namespace create KV`
 
 # Production intentionally has no R2 binding. Media uses Backblaze B2, so a
 # Cloudflare account without an R2 subscription can deploy this Worker.
