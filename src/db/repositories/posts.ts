@@ -358,6 +358,7 @@ export class PostRepository {
     limit: number;
     includeDrafts?: boolean;
     mediaOnly?: boolean;
+    excludeIds?: string[];
   }): Promise<PostWithAuthor[]> {
     const where: string[] = ['p.author_id = ?'];
     const params: (string | number)[] = [options.authorId];

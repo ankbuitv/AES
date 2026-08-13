@@ -34,7 +34,13 @@ export type IdPrefix =
   | 'xp'
   | 'tok'
   | 'mnt'
-  | 'cln';
+  | 'cln'
+  | 'rev'
+  | 'opt'
+  | 'col'
+  | 'cnv'
+  | 'msg'
+  | 'psh';
 
 export function newId(prefix: IdPrefix): string {
   const ts = Date.now().toString(36).padStart(9, '0');
