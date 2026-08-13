@@ -45,11 +45,25 @@ export class AppError extends Error {
   readonly details?: Record<string, unknown>;
   /** Never serialised — logged only. */
   readonly internal?: unknown;
+  /**
+   * When true, `message` is shown to API clients even for 5xx errors. Every
+   * `AppError.message` is already safe to show (secrets live in `internal`),
+   * but 5xx messages are hidden by default so a dependency failure cannot leak
+   * provider internals. Errors where the message is deliberately written for
+   * the person at the keyboard — a missing configuration the operator must fix
+   * — opt in here.
+   */
+  readonly exposeMessage: boolean;
 
   constructor(
     code: ErrorCode,
     message: string,
-    options: { status?: number; details?: Record<string, unknown>; internal?: unknown } = {},
+    options: {
+      status?: number;
+      details?: Record<string, unknown>;
+      internal?: unknown;
+      exposeMessage?: boolean;
+    } = {},
   ) {
     super(message);
     this.name = 'AppError';
@@ -57,6 +71,7 @@ export class AppError extends Error {
     this.status = options.status ?? STATUS_BY_CODE[code] ?? 500;
     this.details = options.details;
     this.internal = options.internal;
+    this.exposeMessage = options.exposeMessage ?? false;
   }
 
   static badRequest(message = 'Invalid request', details?: Record<string, unknown>) {

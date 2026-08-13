@@ -59,7 +59,11 @@ export function jsonError(c: Context<AppContext>, error: AppError): Response {
     data: null,
     error: {
       code: error.code,
-      message: error.status >= 500 ? 'Something went wrong' : error.message,
+      // 5xx messages are hidden by default so provider internals (bucket names,
+      // signed URLs, …) can never leak through a JSON envelope. Errors that opt
+      // into `exposeMessage` carry a message written for the person at the
+      // keyboard (e.g. "storage is not configured") and are shown verbatim.
+      message: error.status >= 500 && !error.exposeMessage ? 'Something went wrong' : error.message,
       ...(requestId ? { requestId } : {}),
       ...(safeDetails ? { details: safeDetails } : {}),
     },

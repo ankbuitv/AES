@@ -146,6 +146,26 @@ describe('upload', () => {
 
     expect(second.body.data!.media.id).toBe(first.body.data!.media.id);
   });
+
+  it('surfaces the operator-facing message when storage is unconfigured', async () => {
+    const client = new TestClient({ STORAGE_PROVIDER: 'b2' });
+    // Remove the local R2 fallback so the b2 provider is genuinely unconfigured.
+    delete (client.bindings as unknown as Record<string, unknown>).MEDIA_BUCKET;
+    await client.register({ username: 'noconfig' });
+
+    const result = await client.upload('/api/media/upload', {
+      name: 'pixel.png',
+      type: 'image/png',
+      bytes: TINY_PNG,
+    });
+
+    expect(result.status).toBe(502);
+    expect(result.body.error?.code).toBe('STORAGE_ERROR');
+    // A configuration gap is actionable, unlike a generic 5xx: the person
+    // holding the keyboard needs the missing-variable hint, not "Something
+    // went wrong".
+    expect(result.body.error?.message).toContain('B2 storage is not configured');
+  });
 });
 
 describe('serving', () => {
