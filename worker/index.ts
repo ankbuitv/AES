@@ -32,6 +32,7 @@ import staticPages from '../src/routes/pages/static';
 import { buildServiceContext } from '../src/services/context';
 import { runScheduled } from '../src/services/jobs';
 import { checkStorageHealth } from '../src/services/storageFactory';
+import { checkSchema, ensureSchema } from '../src/db/schema';
 import { randomToken } from '../src/utils/id';
 import { getConfig } from '../src/config';
 
@@ -57,13 +58,20 @@ app.get('/health', async (c) => {
     requestId: c.get('requestId') ?? randomToken(8),
   });
 
-  const [db, storage] = await Promise.all([
+  // Apply pending migrations before probing so a freshly-created D1 becomes
+  // usable on the first health check after deploy.
+  const schemaApply = await ensureSchema(c.env.DB).catch(() => null);
+
+  const [db, storage, schema] = await Promise.all([
     ctx.repos.db
       .scalar<number>('SELECT 1')
       .then(() => 'ok' as const)
       .catch(() => 'error' as const),
     checkStorageHealth(c.env)
       .then((result) => (result.ok ? ('ok' as const) : ('error' as const)))
+      .catch(() => 'error' as const),
+    checkSchema(c.env.DB)
+      .then((result) => result.status)
       .catch(() => 'error' as const),
   ]);
 
@@ -72,7 +80,10 @@ app.get('/health', async (c) => {
     status: 'ok',
     environment: config.environment,
     version: 1,
-    checks: { database: db, storage },
+    checks: { database: db, storage, schema },
+    schema: schemaApply
+      ? { ready: schemaApply.ready, applied: schemaApply.applied.length, pending: schemaApply.pending.length }
+      : undefined,
     timestamp: new Date().toISOString(),
   });
 });
@@ -103,12 +114,14 @@ export default {
     });
 
     ctx.waitUntil(
-      runScheduled(serviceCtx, event.cron).catch((error: unknown) => {
-        serviceCtx.logger.error('scheduled_failed', {
-          cron: event.cron,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }),
+      ensureSchema(env.DB)
+        .then(() => runScheduled(serviceCtx, event.cron))
+        .catch((error: unknown) => {
+          serviceCtx.logger.error('scheduled_failed', {
+            cron: event.cron,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }),
     );
   },
 };

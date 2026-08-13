@@ -49,7 +49,21 @@ export function json<T>(c: Context<AppContext>, data: T, status = 200): Response
 
 /** Send an error envelope built from an AppError. */
 export function jsonError(c: Context<AppContext>, error: AppError): Response {
-  const body = fail(error.code, error.message, error.details);
+  const requestId = c.get('requestId') ?? undefined;
+  const safeDetails =
+    error.status >= 500
+      ? undefined
+      : error.details;
+  const body: ApiFailure = {
+    success: false,
+    data: null,
+    error: {
+      code: error.code,
+      message: error.status >= 500 ? 'Something went wrong' : error.message,
+      ...(requestId ? { requestId } : {}),
+      ...(safeDetails ? { details: safeDetails } : {}),
+    },
+  };
   const res = c.json(body, error.status as 400);
   if (error.code === 'RATE_LIMITED') {
     const retryAfter = Number(error.details?.retryAfter ?? 60);

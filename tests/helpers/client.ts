@@ -14,7 +14,7 @@ import type { Bindings } from '../../src/types/env';
 export interface ApiEnvelope<T = unknown> {
   success: boolean;
   data: T | null;
-  error: { code: string; message: string; details?: unknown } | null;
+  error: { code: string; message: string; requestId?: string; details?: unknown } | null;
 }
 
 export interface TestResponse<T = unknown> {
@@ -37,8 +37,8 @@ export class TestClient {
   private cookies = new Map<string, string>();
   private csrf: string | null = null;
 
-  constructor(overrides: Partial<Bindings> = {}) {
-    this.env = createTestEnv(overrides);
+  constructor(overrides: Partial<Bindings> = {}, options: { empty?: boolean } = {}) {
+    this.env = createTestEnv(overrides, options);
   }
 
   get bindings(): Bindings {

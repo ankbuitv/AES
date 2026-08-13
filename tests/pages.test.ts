@@ -28,6 +28,9 @@ describe('server-side rendering', () => {
     expect(body).toContain('<main id="main"');
     expect(body).toContain('class="skip-link"');
     expect(body).toContain('/assets/app.css');
+    expect(body).toContain('AES');
+    expect(body).toContain('/logo-mark.svg');
+    expect(body).toContain('window.__AES__');
   });
 
   it('renders a post page with article metadata and JSON-LD', async () => {

@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# AnkSocial — local development secrets
+# AES — local development secrets
 # Copy to `.dev.vars` (git-ignored) and fill in real values.
 # In production these are set with: `wrangler secret put <NAME> --env=""`.
 # Add `--env preview` when configuring the optional preview Worker.

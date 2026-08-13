@@ -1,4 +1,4 @@
-# AnkSocial
+# AES — Ank Ecosystem Social
 
 A complete, production-ready mini social platform that runs **entirely on Cloudflare Workers** — no origin server, no VPS, no PHP, no traditional backend.
 
@@ -113,7 +113,7 @@ npm run db:migrate:preview      # preview environment
 npm run db:migrate:prod         # production
 ```
 
-All eight migrations (`0001_initial` … `0008_search`) are idempotent and tracked by Wrangler's `d1_migrations` table. **The application never creates or alters a table at runtime.**
+All eight migrations (`0001_initial` … `0008_search`) are idempotent and tracked by Wrangler's `d1_migrations` table. The Worker also applies the same bundled SQL on first request if the production D1 is empty (Workers Builds does not run `d1 migrations apply`). That bootstrap only executes the checked-in migration files.
 
 ### 7. Generate and set the secrets
 

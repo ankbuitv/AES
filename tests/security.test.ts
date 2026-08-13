@@ -222,7 +222,10 @@ describe('error envelope', () => {
     expect(response.status).toBe(404);
     expect(response.body).toMatchObject({ success: false, data: null });
     expect(response.body.error?.code).toBe('NOT_FOUND');
+    expect(response.body.error?.requestId).toBeTruthy();
     expect(response.text).not.toMatch(/at .+\(.+:\d+:\d+\)/);
+    expect(response.text).not.toContain('Database error');
+    expect(response.text).not.toMatch(/SELECT /i);
   });
 
   it('renders an HTML error page for browser navigation', async () => {

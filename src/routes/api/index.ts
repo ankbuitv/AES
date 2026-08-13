@@ -57,7 +57,7 @@ api.route('/admin', admin);
 api.get('/', (c) => {
   c.header('cache-control', 'public, max-age=0, s-maxage=300');
   return json(c, {
-    name: 'AnkSocial API',
+    name: 'AES API',
     version: 1,
     endpoints: [
       '/api/auth',

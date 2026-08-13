@@ -121,6 +121,10 @@ export class FakeD1 {
  * when that fails (which never happens with the shipped migrations, but keeps
  * the harness robust).
  */
+export function createEmptyDatabase(): FakeD1 {
+  return new FakeD1(new DatabaseSync(':memory:'));
+}
+
 export function createTestDatabase(): FakeD1 {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON;');

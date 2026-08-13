@@ -39,7 +39,7 @@ const TABS: { key: SearchTab; label: string }[] = [
 function searchForm(input: SearchPageInput): string {
   return html`
     <form class="searchform" method="get" action="/search" role="search">
-      <label class="sr-only" for="search-q">Search AnkSocial</label>
+      <label class="sr-only" for="search-q">Search AES</label>
       <input id="search-q" class="searchform__input" type="search" name="q" value="${input.query}"
              maxlength="${LIMITS.searchQueryMax}" placeholder="Search posts, people and tags"
              autocomplete="off" spellcheck="false">

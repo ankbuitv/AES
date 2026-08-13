@@ -14,6 +14,7 @@ import { getConfig } from '../config';
 import { createLogger } from '../utils/logger';
 import { privacyHash } from '../utils/crypto';
 import { randomToken } from '../utils/id';
+import { ensureSchema, isSchemaReady } from '../db/schema';
 
 /** Cloudflare always sets CF-Connecting-IP; the others are dev fallbacks. */
 export function clientIp(request: Request): string {
@@ -48,6 +49,18 @@ export const requestContext = (): MiddlewareHandler<AppContext> => {
     // logs and KV keys never contain personal data.
     const salt = c.env.IP_HASH_SALT || c.env.SESSION_SECRET || 'dev-salt';
     c.set('clientKey', `ip:${(await privacyHash(ip, salt)).slice(0, 32)}`);
+
+    if (c.env.DB && !isSchemaReady(c.env.DB)) {
+      const schema = await ensureSchema(c.env.DB);
+      if (!schema.ok) {
+        logger.error('schema_bootstrap_failed', {
+          error: schema.error ?? 'unknown',
+          pending: schema.pending.length,
+        });
+      } else if (schema.applied.length) {
+        logger.info('schema_ready', { applied: schema.applied.length });
+      }
+    }
 
     await next();
 
