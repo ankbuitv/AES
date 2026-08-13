@@ -1,0 +1,49 @@
+{
+  "name": "ank-social",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AnkSocial — a mini social platform running entirely on Cloudflare Workers + D1 + Backblaze B2",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run build:assets && wrangler dev --ip 0.0.0.0 --port 8787",
+    "dev:worker": "wrangler dev --ip 0.0.0.0 --port 8787",
+    "build:css": "tailwindcss -i src/styles/app.css -o public/assets/app.css --minify",
+    "build:client": "node scripts/build-client.mjs",
+    "build:assets": "npm run build:css && npm run build:client",
+    "build": "npm run build:assets && npm run typecheck",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/client/tsconfig.json && tsc --noEmit -p tests/tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:create": "wrangler d1 create ank-social",
+    "db:migrate:local": "wrangler d1 migrations apply ank-social --local",
+    "db:migrate:preview": "wrangler d1 migrations apply ank-social --env preview --remote",
+    "db:migrate:prod": "wrangler d1 migrations apply ank-social --env production --remote",
+    "db:reset:local": "node scripts/reset-local-db.mjs",
+    "db:studio": "wrangler d1 execute ank-social --local --command",
+    "seed": "node scripts/seed.mjs --local",
+    "seed:remote": "node scripts/seed.mjs --remote",
+    "create-admin": "node scripts/create-admin.mjs",
+    "deploy": "npm run build:assets && wrangler deploy",
+    "deploy:preview": "npm run build:assets && wrangler deploy --env preview",
+    "deploy:prod": "npm run build:assets && wrangler deploy --env production",
+    "check": "npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "hono": "^4.13.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260811.1",
+    "@tailwindcss/cli": "^4.1.10",
+    "@types/node": "^22.20.1",
+    "esbuild": "^0.25.0",
+    "tailwindcss": "^4.1.10",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.122.0"
+  }
+}

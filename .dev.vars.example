@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# AnkSocial — local development secrets
+# Copy to `.dev.vars` (git-ignored) and fill in real values.
+# In preview/production these are set with:  wrangler secret put <NAME> [--env production]
+# ---------------------------------------------------------------------------
+
+# Signing key for CSRF tokens, cookie integrity and internal HMACs.
+# Generate with:  openssl rand -hex 32
+SESSION_SECRET="dev-only-change-me-0000000000000000000000000000000000000000000000"
+
+# Salt used when hashing IP addresses / user agents before storing them (privacy).
+# Generate with:  openssl rand -hex 16
+IP_HASH_SALT="dev-only-ip-salt-change-me"
+
+# ---------------------------------------------------------------------------
+# Storage provider: "b2" (Backblaze B2 native API) | "s3" (any S3-compatible,
+# including the Backblaze S3 endpoint) | "r2" (Cloudflare R2 binding).
+# Local dev defaults to "r2" because Wrangler simulates R2 on disk with no
+# credentials required. Production should use "b2".
+# ---------------------------------------------------------------------------
+STORAGE_PROVIDER="r2"
+
+# --- Backblaze B2 (native B2 API) ---
+B2_APPLICATION_KEY_ID=""
+B2_APPLICATION_KEY=""
+B2_BUCKET_ID=""
+B2_BUCKET_NAME=""
+# Optional: override the B2 authorization endpoint (rarely needed)
+# B2_API_URL="https://api.backblazeb2.com"
+
+# --- S3-compatible mode (Backblaze S3 endpoint, MinIO, R2 S3 API, ...) ---
+# S3_ENDPOINT="https://s3.us-west-004.backblazeb2.com"
+# S3_REGION="us-west-004"
+# S3_BUCKET=""
+# S3_ACCESS_KEY_ID=""
+# S3_SECRET_ACCESS_KEY=""

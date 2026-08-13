@@ -1,0 +1,157 @@
+#:schema node_modules/wrangler/config-schema.json
+# ---------------------------------------------------------------------------
+# AnkSocial — Cloudflare Worker configuration
+# This file contains NON-SECRET configuration only.
+# Secrets (B2 keys, SESSION_SECRET, ...) are set with `wrangler secret put`.
+# ---------------------------------------------------------------------------
+name = "ank-social"
+main = "worker/index.ts"
+compatibility_date = "2025-08-01"
+workers_dev = true
+
+# Static assets (compiled CSS/JS, icons). Served by Cloudflare's asset layer
+# before the Worker runs, so they never cost a Worker invocation.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "none"
+
+[observability]
+enabled = true
+
+# --- Non-secret runtime configuration -------------------------------------
+[vars]
+ENVIRONMENT = "development"
+SITE_NAME = "AnkSocial"
+SITE_URL = "http://localhost:8787"
+SITE_DESCRIPTION = "A modern, community-first mini social platform."
+STORAGE_PROVIDER = "r2"            # r2 | b2 | s3  (local dev uses simulated R2)
+MAX_UPLOAD_BYTES = "10485760"      # 10 MiB per file
+MAX_JSON_BODY_BYTES = "262144"     # 256 KiB
+ALLOWED_UPLOAD_MIME = "image/jpeg,image/png,image/webp,image/gif"
+REGISTRATION_OPEN = "true"
+LOG_LEVEL = "info"
+
+# --- D1: primary application database --------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "ank-social"
+database_id = "00000000-0000-0000-0000-000000000000" # replace after `npm run db:create`
+migrations_dir = "migrations"
+
+# --- KV: rate limiting, caches, short-lived tokens --------------------------
+[[kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000" # replace after `wrangler kv namespace create KV`
+
+# --- R2 (used as the storage provider in local dev, optional in prod) -------
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "ank-social-media"
+
+# --- Scheduled maintenance --------------------------------------------------
+[triggers]
+crons = [
+  "*/15 * * * *", # expired sessions + rate-limit sweep
+  "27 3 * * *",   # nightly: orphan media cleanup, stats aggregation, hard-delete
+]
+
+# --- Queues (optional, paid feature) ----------------------------------------
+# Background jobs run inline via ctx.waitUntil() when no queue is bound, so the
+# app works without Queues. Enable for higher-volume fan-out:
+#   wrangler queues create ank-social-jobs
+#   wrangler queues create ank-social-jobs-dlq
+# then uncomment:
+# [[queues.producers]]
+# binding = "JOBS"
+# queue = "ank-social-jobs"
+#
+# [[queues.consumers]]
+# queue = "ank-social-jobs"
+# max_batch_size = 25
+# max_batch_timeout = 10
+# max_retries = 3
+# dead_letter_queue = "ank-social-jobs-dlq"
+
+# ===========================================================================
+# Preview environment
+# ===========================================================================
+[env.preview]
+name = "ank-social-preview"
+
+[env.preview.assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "none"
+
+[env.preview.vars]
+ENVIRONMENT = "preview"
+SITE_NAME = "AnkSocial (preview)"
+SITE_URL = "https://ank-social-preview.workers.dev"
+SITE_DESCRIPTION = "A modern, community-first mini social platform."
+STORAGE_PROVIDER = "b2"
+MAX_UPLOAD_BYTES = "10485760"
+MAX_JSON_BODY_BYTES = "262144"
+ALLOWED_UPLOAD_MIME = "image/jpeg,image/png,image/webp,image/gif"
+REGISTRATION_OPEN = "true"
+LOG_LEVEL = "info"
+
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "ank-social-preview"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[env.preview.kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"
+
+[env.preview.observability]
+enabled = true
+
+[env.preview.triggers]
+crons = ["*/15 * * * *", "27 3 * * *"]
+
+# ===========================================================================
+# Production environment
+# ===========================================================================
+[env.production]
+name = "ank-social-production"
+# Custom domain — replace with yours. Nothing in the code hard-codes it;
+# business logic reads SITE_URL / the incoming request origin.
+# routes = [
+#   { pattern = "ankb.qzz.io", custom_domain = true }
+# ]
+
+[env.production.assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "none"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+SITE_NAME = "AnkSocial"
+SITE_URL = "https://ankb.qzz.io"
+SITE_DESCRIPTION = "A modern, community-first mini social platform."
+STORAGE_PROVIDER = "b2"
+MAX_UPLOAD_BYTES = "10485760"
+MAX_JSON_BODY_BYTES = "262144"
+ALLOWED_UPLOAD_MIME = "image/jpeg,image/png,image/webp,image/gif"
+REGISTRATION_OPEN = "true"
+LOG_LEVEL = "warn"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "ank-social"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"
+
+[env.production.observability]
+enabled = true
+
+[env.production.triggers]
+crons = ["*/15 * * * *", "27 3 * * *"]
