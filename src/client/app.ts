@@ -500,7 +500,10 @@ async function submitComment(form: HTMLFormElement): Promise<void> {
 
     const list = $('[data-comment-list]');
     const parentInput = form.querySelector<HTMLInputElement>('[data-parent-input]');
-    const parentId = parentIrent?.querySelector<HTMLElement>('.comment__replies');
+    const parentId = parentInput?.value;
+    if (parentId) {
+      const parent = $<HTMLElement>(`[data-comment-id="${CSS.escape(parentId)}"]`);
+      let replies = parent?.querySelector<HTMLElement>('.comment__replies');
       if (parent && !replies) {
         replies = document.createElement('ul');
         replies.className = 'comment__replies';
@@ -1289,12 +1292,4 @@ if (document.readyState === 'loading') {
   init();
 }
 
-export {};
-State === 'loading') {
-  document.addEventListener('DOMContentLoaded', init, { once: true });
-} else {
-  init();
-}
-
-export {};
 export {};
