@@ -60,6 +60,29 @@ describe('posts', () => {
     expect(feed.body.data).toHaveProperty('hasMore');
   });
 
+  it('shows another member public posts on the latest feed', async () => {
+    const alice = await withAuthor('alicefeed');
+    const post = (
+      await alice.post<PostPayload>('/api/posts', { content: 'hello from alice, everyone should see this' })
+    ).body.data!.post;
+
+    const bob = new TestClient();
+    Object.assign(bob, { env: alice.env });
+    await bob.register({ username: 'bobfeed' });
+
+    const asBob = await bob.get<Page<{ id: string; author?: { username: string } }>>(
+      '/api/posts?sort=latest',
+    );
+    expect(asBob.status).toBe(200);
+    expect(asBob.body.data!.items.some((item) => item.id === post.id)).toBe(true);
+
+    const asGuest = new TestClient();
+    Object.assign(asGuest, { env: alice.env });
+    const guestFeed = await asGuest.get<Page<{ id: string }>>('/api/posts?sort=latest');
+    expect(guestFeed.status).toBe(200);
+    expect(guestFeed.body.data!.items.some((item) => item.id === post.id)).toBe(true);
+  });
+
   it('requires authentication to publish', async () => {
     const client = new TestClient();
     await client.get('/login', { headers: { accept: 'text/html' } });
@@ -168,6 +191,28 @@ describe('posts', () => {
 
     const firstIds = new Set(first.body.data!.items.map((i) => i.id));
     expect(second.body.data!.items.some((i) => firstIds.has(i.id))).toBe(false);
+  });
+
+  it('lets the author pin a post so it appears first in the latest feed', async () => {
+    const client = await withAuthor('pinner');
+    const older = (await client.post<PostPayload>('/api/posts', { content: 'older post' })).body
+      .data!.post;
+    const newer = (await client.post<PostPayload>('/api/posts', { content: 'newer post' })).body
+      .data!.post;
+
+    const pinned = await client.post<{ pinned: boolean }>(`/api/posts/${older.id}/pin`);
+    expect(pinned.status).toBe(200);
+    expect(pinned.body.data!.pinned).toBe(true);
+
+    const feed = await client.get<Page<{ id: string; pinned?: boolean }>>('/api/posts?sort=latest');
+    expect(feed.body.data!.items[0]?.id).toBe(older.id);
+    expect(feed.body.data!.items[0]?.pinned).toBe(true);
+    expect(feed.body.data!.items.some((item) => item.id === newer.id)).toBe(true);
+
+    const stranger = new TestClient();
+    Object.assign(stranger, { env: client.env });
+    await stranger.register({ username: 'unpinme' });
+    expect((await stranger.post(`/api/posts/${older.id}/pin`)).status).toBe(403);
   });
 });
 

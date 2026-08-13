@@ -20,6 +20,8 @@ export const IMAGE_MIME_TYPES = new Set([
   'image/png',
   'image/webp',
   'image/gif',
+  'video/mp4',
+  'video/webm',
 ]);
 
 const EXTENSION_BY_MIME: Record<string, string> = {
@@ -27,6 +29,8 @@ const EXTENSION_BY_MIME: Record<string, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
   'image/gif': 'gif',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
 };
 
 /**
@@ -79,6 +83,13 @@ export function sniffMime(bytes: Uint8Array): SniffResult | null {
     startsWith(bytes, [0x57, 0x45, 0x42, 0x50], 8)
   ) {
     return { mime: 'image/webp', extension: 'webp', ...readWebpSize(bytes) };
+  }
+
+  if (startsWith(bytes, [0x66, 0x74, 0x79, 0x70], 4)) {
+    return { mime: 'video/mp4', extension: 'mp4' };
+  }
+  if (startsWith(bytes, [0x1a, 0x45, 0xdf, 0xa3])) {
+    return { mime: 'video/webm', extension: 'webm' };
   }
 
   return null;

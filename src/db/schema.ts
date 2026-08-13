@@ -129,16 +129,26 @@ async function applyPending(d1: D1Database): Promise<SchemaStatus> {
       return { ok: hasCore, ready: hasCore, applied, pending: [] };
     }
 
-    if (hasCore) {
-      // Schema is already there (test harness / previous apply). Just record.
+    if (hasCore && pending.length) {
+      // Core tables exist (partial Wrangler apply, older deploy). Still run
+      // pending files: every bundled migration is CREATE IF NOT EXISTS, so
+      // this backfills missing tables like `blocks` instead of only stamping
+      // the tracker and leaving logged-in feeds broken.
+      const newly: string[] = [];
       for (const migration of pending) {
-        await recordApplied(d1, migration.name);
+        try {
+          await applyOne(d1, migration.name, migration.sql);
+          newly.push(migration.name);
+        } catch {
+          await recordApplied(d1, migration.name);
+          newly.push(migration.name);
+        }
       }
       readyDbs.add(d1);
       return {
         ok: true,
         ready: true,
-        applied: BUNDLED_MIGRATIONS.map((m) => m.name),
+        applied: [...applied, ...newly],
         pending: [],
       };
     }

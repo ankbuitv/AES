@@ -69,6 +69,16 @@ export const createPostSchema = z
       .max(20)
       .regex(/^[a-zA-Z0-9+#._-]*$/, 'Invalid language')
       .optional(),
+    pollOptions: z
+      .preprocess((value) => {
+        if (typeof value === 'string') {
+          return value.split('\n').map((s) => s.trim()).filter(Boolean);
+        }
+        return value;
+      }, z.array(z.string().trim().min(1).max(80)).max(8))
+      .optional(),
+    scheduledAt: z.union([z.string(), z.number()]).optional(),
+    quotePostId: idSchema.optional(),
   })
   .superRefine((value, ctx) => {
     if (value.contentType === 'article' && !value.title.trim()) {
@@ -101,6 +111,9 @@ export const feedQuerySchema = z.object({
   category: z.string().max(120).optional(),
   tag: z.string().max(50).optional(),
   author: z.string().max(24).optional(),
+  since: z.union([z.string(), z.number()]).optional(),
+  window: z.enum(['day', 'week', 'month']).optional(),
+  tags: z.enum(['followed']).optional(),
 });
 
 export const createCommentSchema = z.object({

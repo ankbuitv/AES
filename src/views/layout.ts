@@ -69,6 +69,8 @@ const NAV: readonly NavItem[] = [
   { key: 'trending', href: '/trending', label: 'Trending', icon: 'flame', group: 'primary' },
   { key: 'following', href: '/following', label: 'Following', icon: 'users', auth: true, group: 'primary' },
   { key: 'bookmarks', href: '/bookmarks', label: 'Bookmarks', icon: 'bookmark', auth: true, group: 'library' },
+  { key: 'messages', href: '/messages', label: 'Messages', icon: 'comment', auth: true, group: 'library' },
+  { key: 'topics', href: '/topics', label: 'Topics', icon: 'compass', auth: true, group: 'library' },
   { key: 'notifications', href: '/notifications', label: 'Notifications', icon: 'bell', auth: true, group: 'library' },
   { key: 'about', href: '/about', label: 'About', icon: 'info', group: 'legal' },
   { key: 'status', href: '/status', label: 'Status', icon: 'activity', group: 'legal' },
@@ -309,6 +311,7 @@ export function renderLayout(input: LayoutInput): string {
     ...(input.bootstrap ?? {}),
   }))};</script>
   <script src="/assets/app.js" nonce="${input.nonce}" defer></script>
+  <script nonce="${input.nonce}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script>
 </body>
 </html>`}`;
 }

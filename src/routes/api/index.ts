@@ -26,6 +26,7 @@ import media from './media';
 import notifications from './notifications';
 import search, { categories, tags } from './search';
 import admin, { reports } from './admin';
+import extras from './extras';
 
 const api = new Hono<AppContext>();
 
@@ -49,6 +50,7 @@ api.route('/tags', tags);
 api.route('/categories', categories);
 api.route('/reports', reports);
 api.route('/admin', admin);
+api.route('/community', extras);
 
 /**
  * Small discovery document. Useful for smoke-testing a fresh deployment

@@ -61,6 +61,11 @@ posts.get('/', readLimit(), async (c) => {
     limit: parseLimit(query.limit === undefined ? undefined : String(query.limit)),
     ...(query.tag ? { tagSlug: query.tag.toLowerCase() } : {}),
     ...(query.category ? { categorySlug: query.category.toLowerCase() } : {}),
+    ...(query.since !== undefined
+      ? { since: Math.max(0, Math.floor(Number(query.since)) || 0) }
+      : {}),
+    ...(query.window ? { window: query.window } : {}),
+    ...(query.tags === 'followed' ? { followedTagsOnly: true } : {}),
   });
 
   feedCacheHeaders(c, sort);
@@ -162,6 +167,15 @@ posts.post('/:id/reactions', requireAuth(), rateLimit('write'), async (c) => {
     targetType: input.targetType,
     targetId: parseOrThrow(idSchema, c.req.param('id')),
     reaction: input.reaction,
+  });
+  return json(c, result);
+});
+
+posts.post('/:id/pin', requireAuth(), rateLimit('write'), async (c) => {
+  const viewer = requireUser(c.get('user'));
+  const result = await service(c).pin({
+    viewer,
+    postId: parseOrThrow(idSchema, c.req.param('id')),
   });
   return json(c, result);
 });

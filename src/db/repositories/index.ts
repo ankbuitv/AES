@@ -17,6 +17,7 @@ import { JobRepository, NotificationRepository } from './notifications';
 import { AuditRepository, ReportRepository, StatsRepository } from './moderation';
 import { CategoryRepository, SettingsRepository, TagRepository } from './tags';
 import { MentionRepository } from './mentions';
+import { ExtraRepository } from './extras';
 
 export interface Repositories {
   db: Db;
@@ -36,6 +37,7 @@ export interface Repositories {
   categories: CategoryRepository;
   settings: SettingsRepository;
   mentions: MentionRepository;
+  extras: ExtraRepository;
 }
 
 export function createRepositories(d1: D1Database): Repositories {
@@ -58,6 +60,7 @@ export function createRepositories(d1: D1Database): Repositories {
     categories: new CategoryRepository(db),
     settings: new SettingsRepository(db),
     mentions: new MentionRepository(db),
+    extras: new ExtraRepository(db),
   };
 }
 

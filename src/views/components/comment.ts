@@ -51,7 +51,8 @@ function commentItem(comment: CommentDTO, canReply: boolean): string {
                   👍 <span data-reaction-count>${comment.reactionCount}</span>
                 </button>
                 ${canReply && comment.depth < LIMITS.commentMaxDepth
-                  ? raw(html`<button class="action action--sm" type="button" data-reply-to="${comment.id}">Reply</button>`)
+                  ? raw(html`<button class="action action--sm" type="button" data-reply-to="${comment.id}">Reply</button>
+                      <button class="action action--sm" type="button" data-quote-comment>Quote</button>`)
                   : ''}
                 ${comment.canEdit
                   ? raw(html`<button class="action action--sm" type="button" data-edit-comment="${comment.id}">Edit</button>`)

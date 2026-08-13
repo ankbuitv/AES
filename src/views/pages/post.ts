@@ -26,6 +26,18 @@ export function renderPostPage(input: PostPageInput): string {
 
     ${raw(postArticle(input.post))}
 
+    <aside class="related" data-related data-post-id="${input.post.id}">
+      <h2 class="section__title">Cùng chủ đề</h2>
+      <div class="related__list" data-related-list></div>
+    </aside>
+
+    <div class="readerbar">
+      <button class="btn btn--ghost btn--small" type="button" data-reader-mode>Reader mode</button>
+      <a class="btn btn--ghost btn--small" href="#comments">Comments</a>
+    </div>
+    <div class="read-progress" data-read-progress hidden></div>
+    <nav class="toc" data-toc hidden><strong>Mục lục</strong><ol data-toc-list></ol></nav>
+
     ${raw(
       commentThread({
         postId: input.post.id,
