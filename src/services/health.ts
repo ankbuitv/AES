@@ -19,9 +19,15 @@ export interface HealthReport {
   version: 1;
   checks: {
     database: 'ok' | 'error';
-    storage: 'ok' | 'error';
+    storage: HealthCheckState;
     schema: HealthCheckState;
   };
+  /**
+   * Public-safe reason for a failing storage check (`checks.storage !== 'ok'`).
+   * Sanitized: provider messages never include credentials, bucket names or
+   * signed URLs, so this can be shown on the status page.
+   */
+  storageError?: string;
   schema: {
     ready: boolean;
     applied: number;
@@ -80,9 +86,10 @@ export async function collectHealthReport(env: Bindings): Promise<HealthReport> 
     timed(async () => {
       try {
         const result = await checkStorageHealth(env);
-        return result.ok ? ('ok' as const) : ('error' as const);
+        if (result.ok) return { state: 'ok' as const, error: undefined };
+        return { state: result.state, error: result.error };
       } catch {
-        return 'error' as const;
+        return { state: 'error' as const, error: 'Storage health check failed' };
       }
     }),
     timed(async () => {
@@ -96,9 +103,11 @@ export async function collectHealthReport(env: Bindings): Promise<HealthReport> 
 
   const checks: HealthReport['checks'] = {
     database: databaseProbe.value,
-    storage: storageProbe.value,
+    storage: storageProbe.value.state,
     schema: schemaProbe.value,
   };
+
+  const storageError = storageProbe.value.state !== 'ok' ? storageProbe.value.error : undefined;
 
   return {
     status: 'ok',
@@ -106,6 +115,7 @@ export async function collectHealthReport(env: Bindings): Promise<HealthReport> 
     environment: env.ENVIRONMENT ?? 'development',
     version: 1,
     checks,
+    ...(storageError ? { storageError } : {}),
     schema: {
       ready: schemaApply.ready,
       applied: schemaApply.applied.length,

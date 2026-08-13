@@ -21,6 +21,19 @@ export function getStorage(env: Bindings): StorageProvider {
   return provider;
 }
 
+/**
+ * Config-gap marker. A missing credential or binding is NOT an outage: the
+ * bucket was never reachable (or stopped being configured), so reporting it as
+ * a 0 ms "storage unavailable" incident is a false alarm and gives an operator
+ * no way to tell "fix the secrets" from "B2 is down".
+ *
+ * `checkStorageHealth` maps these to the `missing` state (like an unapplied
+ * schema), so the status page can say "Not configured" instead of "Unavailable".
+ */
+function notConfigured(message: string): AppError {
+  return new AppError('STORAGE_ERROR', message, { details: { reason: 'not_configured' } });
+}
+
 function build(env: Bindings): StorageProvider {
   const kind = env.STORAGE_PROVIDER ?? 'r2';
 
@@ -36,7 +49,10 @@ function build(env: Bindings): StorageProvider {
         // MEDIA_BUCKET binding is present (local/preview). Prefer a working
         // backend over a constructor throw that reports a false outage.
         if (env.MEDIA_BUCKET) return new R2StorageProvider(env.MEDIA_BUCKET);
-        throw AppError.storage('B2 credentials are not configured');
+        throw notConfigured(
+          'B2 storage is not configured: set B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY, ' +
+            'B2_BUCKET_ID and B2_BUCKET_NAME on the Worker, or bind MEDIA_BUCKET.',
+        );
       }
       return new B2StorageProvider(
         {
@@ -52,7 +68,10 @@ function build(env: Bindings): StorageProvider {
     case 's3':
       if (!env.S3_ENDPOINT || !env.S3_BUCKET || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY) {
         if (env.MEDIA_BUCKET) return new R2StorageProvider(env.MEDIA_BUCKET);
-        throw AppError.storage('S3 storage is not configured');
+        throw notConfigured(
+          'S3 storage is not configured: set S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID and ' +
+            'S3_SECRET_ACCESS_KEY on the Worker, or bind MEDIA_BUCKET.',
+        );
       }
       return new S3StorageProvider({
         endpoint: env.S3_ENDPOINT,
@@ -65,26 +84,44 @@ function build(env: Bindings): StorageProvider {
 
     case 'r2':
       if (!env.MEDIA_BUCKET) {
-        throw AppError.storage('STORAGE_PROVIDER=r2 but no MEDIA_BUCKET binding is configured');
+        throw notConfigured('STORAGE_PROVIDER=r2 but no MEDIA_BUCKET binding is configured');
       }
       return new R2StorageProvider(env.MEDIA_BUCKET);
 
     default:
-      throw AppError.storage(`Unknown storage provider: ${String(kind)}`);
+      throw notConfigured(`Unknown storage provider: ${String(kind)}`);
   }
 }
 
-/** Health probe used by /health and the admin dashboard. */
-export async function checkStorageHealth(
-  env: Bindings,
-): Promise<{ ok: boolean; provider: string; error?: string }> {
+export type StorageHealthState = 'ok' | 'missing' | 'error';
+
+export interface StorageHealthResult {
+  ok: boolean;
+  state: StorageHealthState;
+  provider: string;
+  /** Public-safe reason, present when the check failed. Never includes secrets. */
+  error?: string;
+}
+
+/**
+ * Health probe used by /health and the admin dashboard.
+ *
+ * Failure is classified so operators can act on it:
+ *  - `missing` — the provider cannot even be constructed (credentials or a
+ *    bucket binding are absent). A configuration gap, not an outage.
+ *  - `error` — the provider is configured but the backend is unreachable or
+ *    rejects the probe.
+ */
+export async function checkStorageHealth(env: Bindings): Promise<StorageHealthResult> {
   try {
     const storage = getStorage(env);
     await storage.healthCheck();
-    return { ok: true, provider: storage.name };
+    return { ok: true, state: 'ok', provider: storage.name };
   } catch (error) {
+    const isConfigGap = error instanceof AppError && error.details?.reason === 'not_configured';
     return {
       ok: false,
+      state: isConfigGap ? 'missing' : 'error',
       provider: env.STORAGE_PROVIDER ?? 'unknown',
       error: error instanceof Error ? error.message : 'unknown error',
     };

@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { TestClient } from './helpers/client';
-import { MemoryStorage, TINY_PNG } from './helpers/env';
+import { createTestEnv, MemoryStorage, TINY_PNG } from './helpers/env';
 import { generateObjectKey, assertSafeKey } from '../src/services/storage';
 import { checkStorageHealth } from '../src/services/storageFactory';
 import { AppError } from '../src/utils/errors';
@@ -312,7 +312,21 @@ describe('StorageProvider contract', () => {
     const client = new TestClient();
     const report = await checkStorageHealth(client.env.bindings);
     expect(report.ok).toBe(true);
+    expect(report.state).toBe('ok');
     expect(report.provider).toBe('r2');
+  });
+
+  it('classifies an unconfigured provider as missing, not as an outage', async () => {
+    const env = createTestEnv();
+    const bindings = { ...env.bindings } as Record<string, unknown>;
+    bindings.STORAGE_PROVIDER = 'b2';
+    delete bindings.MEDIA_BUCKET;
+
+    const report = await checkStorageHealth(bindings as never);
+    expect(report.ok).toBe(false);
+    expect(report.state).toBe('missing');
+    expect(report.provider).toBe('b2');
+    expect(report.error).toContain('B2 storage is not configured');
   });
 
   it('refuses a traversal key', () => {

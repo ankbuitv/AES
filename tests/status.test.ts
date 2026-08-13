@@ -39,6 +39,19 @@ describe('status monitoring', () => {
     expect(history.incidents[0]?.resolvedAt).toBe('2026-08-13T08:30:00.000Z');
   });
 
+  it('classifies an unconfigured storage backend as missing, not as an outage', async () => {
+    const env = createTestEnv();
+    const bindings = { ...env.bindings } as Record<string, unknown>;
+    bindings.STORAGE_PROVIDER = 'b2';
+    delete bindings.MEDIA_BUCKET;
+
+    const report = await collectHealthReport(bindings as never);
+    expect(report.checks.database).toBe('ok');
+    expect(report.checks.storage).toBe('missing');
+    expect(report.storageError).toContain('B2 storage is not configured');
+    expect(report.readiness).toBe('degraded');
+  });
+
   it('keeps a bounded 90-day history in one KV record', async () => {
     const env = createTestEnv();
     const healthy = await collectHealthReport(env.bindings);
