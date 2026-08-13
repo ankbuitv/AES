@@ -32,6 +32,7 @@ import {
   sessionCookie,
 } from '../../utils/cookies';
 import { issueCsrfToken, CSRF_TTL } from '../../utils/csrf';
+import { resolveSessionSecret } from '../../config';
 import type { AuthResult } from '../../services/auth';
 import type { Context } from 'hono';
 import { now } from '../../utils/time';
@@ -56,7 +57,7 @@ async function establishSession(c: Context<AppContext>, result: AuthResult): Pro
 
   c.header('set-cookie', sessionCookie(result.session.token, maxAge, secure), { append: true });
 
-  const token = await issueCsrfToken(c.env.SESSION_SECRET ?? '', result.session.sessionId);
+  const token = await issueCsrfToken(resolveSessionSecret(c.env), result.session.sessionId);
   c.header('set-cookie', csrfCookie(token, CSRF_TTL, secure), { append: true });
   c.set('csrfToken', token);
   c.set('user', result.user);

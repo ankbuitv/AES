@@ -10,7 +10,7 @@
 
 import type { MiddlewareHandler } from 'hono';
 import type { AppContext } from '../types/env';
-import { CSRF_COOKIE } from '../config';
+import { CSRF_COOKIE, resolveSessionSecret } from '../config';
 import { getCookie } from '../utils/cookies';
 import { ANONYMOUS_SCOPE, CSRF_FIELD, CSRF_HEADER, assertCsrf, requiresCsrfCheck } from '../utils/csrf';
 import { readBody } from './body';
@@ -43,7 +43,7 @@ export const csrfProtection = (): MiddlewareHandler<AppContext> => {
 
     await assertCsrf({
       request: c.req.raw,
-      secret: c.env.SESSION_SECRET ?? '',
+      secret: resolveSessionSecret(c.env),
       scope: c.get('sessionId') ?? ANONYMOUS_SCOPE,
       allowedOrigins,
       submittedToken: submitted,

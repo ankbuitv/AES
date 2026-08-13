@@ -12,7 +12,7 @@
 
 import type { MiddlewareHandler } from 'hono';
 import type { AppContext } from '../types/env';
-import { CSRF_COOKIE, SESSION_COOKIE } from '../config';
+import { CSRF_COOKIE, SESSION_COOKIE, resolveSessionSecret } from '../config';
 import {
   clearSessionCookie,
   csrfCookie,
@@ -69,13 +69,14 @@ export const sessionMiddleware = (): MiddlewareHandler<AppContext> => {
     // is still valid for this scope we keep it (so parallel tabs agree);
     // otherwise we mint a fresh one and set the cookie.
     //
-    // Without a configured SESSION_SECRET we cannot sign tokens: WebCrypto
-    // rejects a zero-length HMAC key, which would otherwise turn an empty key
-    // into a 500 on every request (including /health). Degrade gracefully
-    // instead — anonymous browsing keeps working and a missing secret surfaces
-    // as a clear 403 on mutating requests, not a cryptic INTERNAL_ERROR.
+    // The signing secret comes from `resolveSessionSecret`: an operator-set
+    // SESSION_SECRET always wins; local development falls back to a fixed
+    // dev-only value so a missing `.dev.vars` cannot silently disable every
+    // form/fetch mutation (uploading a photo included). Outside development a
+    // missing secret degrades gracefully instead of 500-ing: anonymous
+    // browsing keeps working and mutating requests fail with a clear CSRF 403.
     const existing = getCookie(c.req.raw, CSRF_COOKIE);
-    const secret = c.env.SESSION_SECRET ?? '';
+    const secret = resolveSessionSecret(c.env);
     let csrfToken: string | null = null;
 
     if (secret) {

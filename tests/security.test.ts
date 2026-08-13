@@ -103,6 +103,34 @@ describe('CSRF protection', () => {
     const response = await client.get('/api/posts');
     expect(response.status).toBe(200);
   });
+
+  it('keeps local development functional when SESSION_SECRET is missing', async () => {
+    // Regression: without `.dev.vars`, SESSION_SECRET is empty and every
+    // state-changing request — registering, logging in, uploading an image —
+    // used to fail with "Missing CSRF token". In the development environment a
+    // fixed dev-only signing secret keeps `npm run dev` usable out of the box.
+    const client = new TestClient({ SESSION_SECRET: '', ENVIRONMENT: 'development' });
+    // register() fetches /login first; the dev fallback must have minted a
+    // CSRF token there, otherwise the POST below fails with CSRF_FAILED.
+    const user = await client.register({ username: 'devfallback' });
+    expect(user.username).toBe('devfallback');
+  });
+
+  it('fails closed on mutating requests without a secret outside development', async () => {
+    // Preview and production must never fall back to the dev-only secret: an
+    // operator who forgot `wrangler secret put SESSION_SECRET` gets a clear
+    // CSRF error, not silently forgeable tokens.
+    const client = new TestClient({ SESSION_SECRET: '', ENVIRONMENT: 'production' });
+    await client.get('/login', { headers: { accept: 'text/html' } });
+
+    const response = await client.post('/api/auth/register', {
+      username: 'nosecret',
+      email: 'nosecret@example.com',
+      password: 'CorrectHorse!99',
+    });
+    expect(response.status).toBe(403);
+    expect(response.body.error?.code).toBe('CSRF_FAILED');
+  });
 });
 
 describe('rate limiting', () => {
