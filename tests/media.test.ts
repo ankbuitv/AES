@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { TestClient } from './helpers/client';
 import { MemoryStorage, TINY_PNG } from './helpers/env';
 import { generateObjectKey, assertSafeKey } from '../src/services/storage';
+import { checkStorageHealth } from '../src/services/storageFactory';
 import { AppError } from '../src/utils/errors';
 
 const GIF = new Uint8Array([
@@ -305,6 +306,13 @@ describe('StorageProvider contract', () => {
     expect(a).toMatch(/\.png$/);
     expect(a).toContain('usr_1');
     expect(() => assertSafeKey(a)).not.toThrow();
+  });
+
+  it('treats a missing health probe object as a healthy bucket', async () => {
+    const client = new TestClient();
+    const report = await checkStorageHealth(client.env.bindings);
+    expect(report.ok).toBe(true);
+    expect(report.provider).toBe('r2');
   });
 
   it('refuses a traversal key', () => {

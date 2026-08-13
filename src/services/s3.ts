@@ -117,7 +117,9 @@ export class S3StorageProvider implements StorageProvider {
     const signed = await this.sign('HEAD', url, {}, UNSIGNED_PAYLOAD);
     const res = await fetch(url.toString(), { method: 'HEAD', headers: signed });
 
-    if (res.status === 404) return null;
+    // Missing objects are not an error. Some S3-compatible hosts answer 403
+    // or 405 for HEAD of an unknown key even when credentials are valid.
+    if (res.status === 404 || res.status === 403 || res.status === 405) return null;
     if (!res.ok) throw AppError.storage('Could not stat object', { status: res.status });
 
     return {
@@ -145,6 +147,22 @@ export class S3StorageProvider implements StorageProvider {
     const res = await fetch(url.toString(), { method: 'DELETE', headers: signed });
     if (!res.ok && res.status !== 204 && res.status !== 404) {
       throw AppError.storage('Could not delete object', { status: res.status });
+    }
+  }
+
+  async healthCheck(): Promise<void> {
+    const url = new URL(this.objectUrl('health/probe').toString());
+    // List a single key under a reserved prefix — proves signing + bucket
+    // access without requiring an object to exist.
+    url.searchParams.set('list-type', '2');
+    url.searchParams.set('prefix', 'health/');
+    url.searchParams.set('max-keys', '1');
+    const signed = await this.sign('GET', url, {}, UNSIGNED_PAYLOAD);
+    const res = await fetch(url.toString(), { headers: signed });
+    if (res.status === 404) return;
+    if (!res.ok) {
+      // Fall back to a missing-key HEAD: list may be denied on tightly scoped keys.
+      await this.headObject('health/probe');
     }
   }
 

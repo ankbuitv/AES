@@ -60,6 +60,12 @@ export interface StorageProvider {
   getObjectMetadata(key: string): Promise<ObjectMetadata | null>;
 
   /**
+   * Prove credentials and bucket reachability without requiring a known object.
+   * Providers should treat a missing probe key as success.
+   */
+  healthCheck(): Promise<void>;
+
+  /**
    * Time-limited direct URL, when the backend supports it.
    * Returns null for providers where the Worker must proxy the bytes.
    */
