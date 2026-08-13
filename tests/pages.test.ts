@@ -64,6 +64,23 @@ describe('server-side rendering', () => {
     expect(body).toContain('property="og:type" content="profile"');
   });
 
+  it('renders a live, full-width service status dashboard', async () => {
+    const client = new TestClient();
+    const { response, body } = await html(client, '/status');
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(body).toContain('class="status-shell"');
+    expect(body).toContain('All systems operational');
+    expect(body).toContain('Website &amp; API');
+    expect(body).toContain('Media storage');
+    expect(body).toContain('Database schema');
+    expect(body).toContain('90 days ago');
+    expect(body).toContain('data-status-refresh');
+    expect(body).toContain('<link rel="canonical" href="http://localhost:8787/status">');
+    expect(body).not.toContain('class="sidenav"');
+  });
+
   it('serves the auth, search and error pages', async () => {
     const client = new TestClient();
 

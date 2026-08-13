@@ -14,7 +14,7 @@ main = "worker/index.ts"
 compatibility_date = "2025-08-01"
 workers_dev = true
 # Uncomment after the custom domain has been added to Cloudflare:
-# routes = [{ pattern = "ankb.qzz.io", custom_domain = true }]
+# routes = [{ pattern = "me.ankb.qzz.io", custom_domain = true }]
 
 # Static assets (compiled CSS/JS, icons). Served by Cloudflare's asset layer
 # before the Worker runs, so they never cost a Worker invocation.

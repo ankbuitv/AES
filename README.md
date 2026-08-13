@@ -169,10 +169,10 @@ For Cloudflare Workers Builds, set the deploy command to `npx wrangler deploy --
 Add the domain to Cloudflare (orange-clouded), then uncomment the top-level route directly below `workers_dev` in `wrangler.toml`:
 
 ```toml
-routes = [{ pattern = "ankb.qzz.io", custom_domain = true }]
+routes = [{ pattern = "me.ankb.qzz.io", custom_domain = true }]
 ```
 
-Keep `SITE_URL = "https://ankb.qzz.io"` under the top-level `[vars]` block (already the default) and redeploy. The API is then reachable at `https://ankb.qzz.io/api/*` and media at `https://ankb.qzz.io/media/*`.
+Keep `SITE_URL = "https://me.ankb.qzz.io"` under the top-level `[vars]` block (already the default) and redeploy. The API is then reachable at `https://me.ankb.qzz.io/api/*`, media at `https://me.ankb.qzz.io/media/*`, and the public status dashboard at `https://me.ankb.qzz.io/status`.
 
 ### 13. Confirm the production environment
 
@@ -186,12 +186,12 @@ Check that `ENVIRONMENT = "production"`, which enables HSTS, disables the develo
 ### 14. Health check
 
 ```bash
-curl https://ankb.qzz.io/health
-# {"status":"ok","environment":"production","version":1,
-#  "checks":{"database":"ok","storage":"ok"},"timestamp":"..."}
+curl https://me.ankb.qzz.io/health
+# {"status":"ok","readiness":"ready","environment":"production","version":1,
+#  "checks":{"database":"ok","storage":"ok","schema":"ok"},"timestamp":"..."}
 ```
 
-`checks.storage` performs a real `HEAD` against the bucket, so it fails loudly if the B2 credentials are wrong.
+`status` reports Worker liveness, while `readiness` reflects its dependencies. `checks.storage` performs a real `HEAD` against the bucket, so it fails loudly if the B2 credentials are wrong. The human-readable dashboard at [`/status`](https://me.ankb.qzz.io/status) refreshes live and builds honest 90-day availability/incident history from the 15-minute Cron samples stored in KV.
 
 ### 15. Create the administrator account
 
@@ -211,7 +211,7 @@ Sign in at `/login`, then:
 | `/compose` → publish a post | Redirects to `/post/{slug}`, rendered server-side |
 | Comment on the post from a second account | Comment appears; author's bell shows an unread badge |
 | React and bookmark | Counters update in place; `/bookmarks` lists the post |
-| `curl -I https://ankb.qzz.io/media/{media_id}` | `200`, `content-type: image/*`, `x-content-type-options: nosniff` |
+| `curl -I https://me.ankb.qzz.io/media/{media_id}` | `200`, `content-type: image/*`, `x-content-type-options: nosniff` |
 | Report a post, then open `/admin` | Report is queued; resolving it writes an `audit_logs` row |
 
 ### 17. Verify the scheduled jobs
@@ -317,7 +317,7 @@ GET    /api/admin/{dashboard,reports,users,posts,audit}   POST /api/admin/action
 GET    /health   /robots.txt   /sitemap.xml   /feed.xml
 ```
 
-Pages: `/`, `/explore`, `/trending`, `/following`, `/bookmarks`, `/post/{slug}`, `/u/{username}[/media|/replies|/followers|/following]`, `/tag/{slug}`, `/category/{slug}`, `/search`, `/notifications`, `/settings`, `/compose`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/leaderboard`, `/admin`, `/about`, `/terms`, `/privacy`.
+Pages: `/`, `/explore`, `/trending`, `/following`, `/bookmarks`, `/post/{slug}`, `/u/{username}[/media|/replies|/followers|/following]`, `/tag/{slug}`, `/category/{slug}`, `/search`, `/notifications`, `/settings`, `/compose`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/leaderboard`, `/admin`, `/about`, `/status`, `/terms`, `/privacy`.
 
 ## Database and migrations
 
@@ -360,7 +360,7 @@ Producers call `repos.jobs.enqueue(type, payload)`; `JobRunner.drain()` claims a
 
 | Schedule | Work |
 | --- | --- |
-| `*/15 * * * *` | drain jobs, purge expired sessions, flush the storage cleanup queue |
+| `*/15 * * * *` | record status/incident history, drain jobs, purge expired sessions, flush the storage cleanup queue |
 | `27 3 * * *` | + stats rollup, orphan media collection, storage integrity sampling, counter reconciliation, purge finished jobs |
 
 Cloudflare Queues are supported but commented out in `wrangler.toml`; the D1-backed queue exists so the platform is fully functional on the free plan.
@@ -368,7 +368,7 @@ Cloudflare Queues are supported but commented out in `wrangler.toml`; the D1-bac
 ## Testing
 
 ```bash
-npm test          # 103 tests
+npm test          # 115 tests
 npm run check     # typecheck (3 projects) + tests
 ```
 
@@ -382,6 +382,7 @@ Tests drive the **real Worker** — `worker/index.ts`, the real middleware chain
 | `media.test.ts` | upload gate (size, PHP/HTML/SVG/ELF, MIME mismatch), dedupe, streaming/ETag/Range, permissions, soft delete + cleanup queue, `StorageProvider` contract, bucket-failure rollback |
 | `pages.test.ts` | SSR markup and landmarks, OpenGraph/JSON-LD/canonical, caching posture, robots/sitemap/RSS, admin authorisation and audit logging |
 | `jobs.test.ts` | job claim/retry/backoff, both cron schedules through `scheduled()`, counter reconciliation, resilience when one task fails |
+| `status.test.ts` | daily uptime aggregation, outage/resolution transitions and 90-day KV retention |
 
 ## Known limitations and workarounds
 

@@ -3,7 +3,7 @@
  *
  * Nothing here is hard-coded per-deployment: the site URL, limits and storage
  * provider all come from `[vars]`/secrets, so the same build runs on
- * localhost, *.workers.dev and a custom domain such as https://ankb.qzz.io.
+ * localhost, *.workers.dev and a custom domain such as https://me.ankb.qzz.io.
  */
 
 import type { Bindings } from './types/env';

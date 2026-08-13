@@ -35,8 +35,19 @@ export function isSchemaReady(d1?: D1Database): boolean {
   return d1 ? readyDbs.has(d1) : false;
 }
 
-function stripPragmas(sql: string): string {
-  return sql.replace(/^\s*PRAGMA[\s\S]*?;\s*$/gim, '').trim();
+function prepareMigrationSql(sql: string): string {
+  // D1Database.exec rejects a chunk whose first line is a standalone SQL
+  // comment ("SQL code did not contain a statement"). Wrangler's migration
+  // runner accepts the same files, so remove line comments before handing the
+  // bundled fallback to D1. PRAGMAs are connection-scoped and unsupported by
+  // the remote exec endpoint; the schema does not depend on them.
+  return sql
+    .replace(/--[^\r\n]*/g, '')
+    .replace(/^\s*PRAGMA\b[^;]*;\s*$/gim, '')
+    // D1 exec treats each newline as a separate query. Collapse formatting so
+    // multiline CREATE TABLE / TRIGGER statements are submitted intact.
+    .replace(/\s*[\r\n]+\s*/g, ' ')
+    .trim();
 }
 
 async function tableExists(d1: D1Database, name: string): Promise<boolean> {
@@ -87,7 +98,7 @@ async function recordApplied(d1: D1Database, name: string): Promise<void> {
 }
 
 async function applyOne(d1: D1Database, name: string, sql: string): Promise<void> {
-  const body = stripPragmas(sql);
+  const body = prepareMigrationSql(sql);
   if (body) await d1.exec(body);
   await recordApplied(d1, name);
 }

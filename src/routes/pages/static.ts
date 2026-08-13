@@ -12,6 +12,9 @@ import { getConfig } from '../../config';
 import { html, raw } from '../../utils/html';
 import { readLimit } from '../../middleware/rateLimit';
 import { renderPage, absoluteUrl } from '../../views/render';
+import { collectHealthReport } from '../../services/health';
+import { loadStatusHistory } from '../../services/statusHistory';
+import { renderStatusPage } from '../../views/pages/status';
 
 const staticPages = new Hono<AppContext>();
 
@@ -122,24 +125,19 @@ staticPages.get('/privacy', readLimit(), async (c) => {
 
 staticPages.get('/status', readLimit(), async (c) => {
   const config = getConfig(c.env);
+  const [report, history] = await Promise.all([
+    collectHealthReport(c.env),
+    loadStatusHistory(c.env),
+  ]);
+
   return renderPage(c, {
     meta: {
       title: 'Service status',
-      description: `${config.siteName} service status.`,
-      noindex: true,
+      description: `Live uptime and service status for ${config.siteName}.`,
+      canonical: absoluteUrl(c, '/status'),
     },
-    body: html`
-      <div class="pagehead">
-        <h1 class="pagehead__title">Service status</h1>
-        <p class="pagehead__sub muted">Live health of AES. The machine-readable probe is at <a href="/health">/health</a>.</p>
-      </div>
-      <article class="panel">
-        <p>If the homepage is unavailable, the database schema may still be applying on first request after a deploy. Refresh once, then check <a href="/health">/health</a>.</p>
-        <p class="muted">AES never exposes internal errors, stack traces or credentials on this page.</p>
-        <a class="btn btn--primary" href="/health">Open health JSON</a>
-      </article>
-    `,
-    cacheSeconds: 30,
+    body: renderStatusPage({ siteName: config.siteName, report, history }),
+    layout: 'status',
   });
 });
 
