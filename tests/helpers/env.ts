@@ -145,6 +145,13 @@ function memoryBucket(storage: MemoryStorage) {
       return { size: bytes.byteLength, httpEtag: `"${bytes.byteLength}"`, version: 'v1' };
     },
     async get(key: string, options?: { range?: { offset?: number; length?: number } }) {
+      // `failNext` covers reads too, so a test can simulate a bucket outage on
+      // the serving path and not just on upload.
+      if (storage.failNext) {
+        const error = storage.failNext;
+        storage.failNext = null;
+        throw error;
+      }
       const object = storage.objects.get(key);
       if (!object) return null;
       const offset = options?.range?.offset ?? 0;

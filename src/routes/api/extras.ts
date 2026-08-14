@@ -132,35 +132,16 @@ extras.post('/collections/assign', requireAuth(), rateLimit('write'), async (c) 
   return json(c, { ok: true });
 });
 
-extras.get('/messages', requireAuth(), async (c) => {
-  const viewer = requireUser(c.get('user'));
-  return json(c, { items: await serviceContext(c).repos.extras.listConversations(viewer.id) });
-});
-
-extras.post('/messages', requireAuth(), rateLimit('write'), async (c) => {
-  const viewer = requireUser(c.get('user'));
-  const body = await c.req.parseBody();
-  const username = String(body.username ?? '').toLowerCase();
-  const content = String(body.content ?? '').trim();
-  if (!content) throw AppError.badRequest('Write a message');
-  const peer = await serviceContext(c).repos.users.findByUsername(username);
-  if (!peer) throw AppError.notFound('User not found');
-  if (peer.id === viewer.id) throw AppError.badRequest('Cannot message yourself');
-  const conversationId = await serviceContext(c).repos.extras.findOrCreateConversation(
-    viewer.id,
-    peer.id,
-  );
-  await serviceContext(c).repos.extras.sendMessage(conversationId, viewer.id, content.slice(0, 4000));
-  return json(c, { conversationId }, 201);
-});
-
-extras.get('/messages/:id', requireAuth(), async (c) => {
-  const viewer = requireUser(c.get('user'));
-  if (!(await serviceContext(c).repos.extras.isMember(c.req.param('id'), viewer.id))) {
-    throw AppError.forbidden('Not in this conversation');
-  }
-  return json(c, { items: await serviceContext(c).repos.extras.listMessages(c.req.param('id')) });
-});
+/**
+ * Legacy direct-message endpoints.
+ *
+ * Direct messages moved to `/api/messages`, which adds pagination, read state
+ * and live delivery. These three routes stay as permanent redirects so an
+ * older cached client keeps working: 308 preserves the method and the body,
+ * so a `POST` of a message is not silently turned into a `GET`.
+ */
+extras.all('/messages', (c) => c.redirect('/api/messages', 308));
+extras.all('/messages/:id', (c) => c.redirect(`/api/messages/${encodeURIComponent(c.req.param('id'))}`, 308));
 
 extras.post('/prefs/digest', requireAuth(), rateLimit('write'), async (c) => {
   const viewer = requireUser(c.get('user'));

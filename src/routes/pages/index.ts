@@ -20,6 +20,7 @@ import { UserService } from '../../services/users';
 import { MediaService } from '../../services/media';
 import { AuthService } from '../../services/auth';
 import { NotificationService } from '../../services/notifications';
+import { MessageService } from '../../services/messages';
 import { ModerationService } from '../../services/moderation';
 import { getSearchProvider, parseSearchOffset } from '../../services/search';
 import { requireAuth, requireGuest, requireStaff, requireUser } from '../../middleware/auth';
@@ -43,6 +44,7 @@ import { renderSettingsPage } from '../../views/pages/settings';
 import { renderNotificationsPage } from '../../views/pages/notifications';
 import { renderSearchPage, type SearchTab } from '../../views/pages/search';
 import { renderComposePage } from '../../views/pages/compose';
+import { renderConversationPage, renderMessagesPage } from '../../views/pages/messages';
 import { renderAdminPage, type AdminTab } from '../../views/pages/admin';
 import { defaultRail } from './rail';
 import type { FeedSort } from '../../db/repositories/posts';
@@ -643,49 +645,71 @@ pages.get('/topics', requireAuth(), readLimit(), async (c) => {
 
 pages.get('/messages', requireAuth(), async (c) => {
   const viewer = requireUser(c.get('user'));
-  const items = await serviceContext(c).repos.extras.listConversations(viewer.id);
-  const body = `
-    <div class="pagehead"><h1 class="pagehead__title">Messages</h1></div>
-    <form class="composer" method="post" action="/api/community/messages" data-settings-form>
-      <input type="hidden" name="_csrf" value="${c.get('csrfToken') ?? ''}">
-      <input name="username" type="text" required placeholder="username" maxlength="24">
-      <textarea name="content" required maxlength="4000" placeholder="Write a DM…"></textarea>
-      <button class="btn btn--primary" type="submit">Send</button>
-    </form>
-    <ul class="peoplelist">
-      ${items
-        .map(
-          (row) => `
-        <li class="peoplelist__item">
-          <div>
-            <a class="peoplelist__name" href="/messages/${row.id}">${escapeText(row.peer_display_name || row.peer_username)}</a>
-            <p class="muted">@${escapeText(row.peer_username)} · ${escapeText(row.last_content || '')}</p>
-          </div>
-        </li>`,
-        )
-        .join('')}
-    </ul>`;
-  return renderPage(c, { meta: { title: 'Messages', noindex: true }, body, active: 'messages' });
+  const service = new MessageService(serviceContext(c));
+  const conversations = await service.listConversations(viewer.id);
+
+  return renderPage(c, {
+    meta: { title: 'Messages', noindex: true },
+    body: renderMessagesPage({ conversations, csrfToken: c.get('csrfToken') ?? null }),
+    active: 'messages',
+    bootstrap: { messages: { conversationId: null } },
+  });
 });
 
 pages.get('/messages/:id', requireAuth(), async (c) => {
   const viewer = requireUser(c.get('user'));
   const id = c.req.param('id');
-  if (!(await serviceContext(c).repos.extras.isMember(id, viewer.id))) {
-    throw AppError.forbidden('Not in this conversation');
-  }
-  const msgs = await serviceContext(c).repos.extras.listMessages(id);
-  const body = `
-    <div class="pagehead"><h1 class="pagehead__title">Conversation</h1></div>
-    <ol class="comment__list">
-      ${msgs
-        .map(
-          (m) => `<li class="comment"><strong>@${escapeText(m.username)}</strong>
-          <div class="prose prose--sm">${escapeText(m.content)}</div></li>`,
-        )
-        .join('')}
-    </ol>`;
-  return renderPage(c, { meta: { title: 'Conversation', noindex: true }, body, active: 'messages' });
+  const service = new MessageService(serviceContext(c));
+  // Throws 404 for non-members: a stranger cannot distinguish "not yours" from
+  // "does not exist".
+  await service.assertMember(id, viewer.id);
+
+  const [conversations, page, peer] = await Promise.all([
+    service.listConversations(viewer.id),
+    service.thread({ conversationId: id, viewerId: viewer.id, limit: 30 }),
+    service.peerOf(id, viewer.id),
+  ]);
+  // Opening the thread is what marks it read; deferred so the HTML is not
+  // waiting on a write.
+  serviceContext(c).defer(service.markRead(id, viewer.id));
+
+  const peerDto = peer
+    ? {
+        id: peer.user_id,
+        username: peer.username,
+        displayName: peer.display_name || peer.username,
+        avatarMediaId: peer.avatar_media_id,
+      }
+    : null;
+
+  return renderPage(c, {
+    meta: {
+      title: peerDto ? `Chat with ${peerDto.displayName}` : 'Conversation',
+      noindex: true,
+    },
+    body: renderConversationPage({
+      conversations,
+      csrfToken: c.get('csrfToken') ?? null,
+      active: {
+        id,
+        peer: peerDto,
+        messages: page.items,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+        latestCursor: page.latestCursor,
+      },
+    }),
+    active: 'messages',
+    bootstrap: {
+      messages: {
+        conversationId: id,
+        latestCursor: page.latestCursor,
+        // Absent when the Worker is deployed without the Durable Object
+        // migration; the client then polls instead of opening a socket.
+        socket: Boolean(c.env.CONVERSATIONS),
+      },
+    },
+  });
 });
 
 pages.get('/compose', requireAuth(), async (c) => {

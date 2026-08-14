@@ -134,6 +134,12 @@ export function toNotificationDTO(row: NotificationWithActor): NotificationDTO {
 export function notificationText(dto: NotificationDTO): string {
   const who = dto.actor?.displayName ?? 'Someone';
   const title = typeof dto.data['title'] === 'string' ? (dto.data['title'] as string) : '';
+  // Direct messages ride on the SYSTEM type (the `notifications.type` CHECK
+  // predates messaging), so they are recognised by their target instead.
+  if (dto.targetType === 'conversation') {
+    const preview = typeof dto.data['preview'] === 'string' ? (dto.data['preview'] as string) : '';
+    return preview ? `${who}: ${preview}` : `${who} sent you a message`;
+  }
   switch (dto.type) {
     case 'FOLLOW':
       return `${who} started following you`;
@@ -165,6 +171,9 @@ export function notificationHtml(dto: NotificationDTO): string {
 
 /** Where clicking the notification should take the reader. */
 export function notificationHref(dto: NotificationDTO): string {
+  if (dto.targetType === 'conversation' && dto.targetId) {
+    return `/messages/${encodeURIComponent(dto.targetId)}`;
+  }
   const slug = typeof dto.data['postSlug'] === 'string' ? (dto.data['postSlug'] as string) : '';
   const commentId =
     typeof dto.data['commentId'] === 'string' ? (dto.data['commentId'] as string) : '';

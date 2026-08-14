@@ -54,6 +54,20 @@ id = "186a5b4976754ed5bdb42af1cd98c423" # replace after `wrangler kv namespace c
 # Production intentionally has no R2 binding. Media uses Backblaze B2, so a
 # Cloudflare account without an R2 subscription can deploy this Worker.
 
+# --- Durable Objects: live chat rooms ---------------------------------------
+# One object per conversation, used only to fan messages out over WebSockets.
+# D1 stays the source of truth, so losing an object costs nothing but a
+# reconnect. SQLite-backed classes are required: new namespaces can no longer
+# be created on the KV backend, and the SQLite backend is the one available on
+# the Workers Free plan.
+[[durable_objects.bindings]]
+name = "CONVERSATIONS"
+class_name = "ConversationRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ConversationRoom"]
+
 # --- Scheduled maintenance --------------------------------------------------
 [triggers]
 crons = [
@@ -117,6 +131,14 @@ binding = "KV"
 binding = "MEDIA_BUCKET"
 bucket_name = "ank-social-media-local"
 
+[[env.local.durable_objects.bindings]]
+name = "CONVERSATIONS"
+class_name = "ConversationRoom"
+
+[[env.local.migrations]]
+tag = "v1"
+new_sqlite_classes = ["ConversationRoom"]
+
 [env.local.triggers]
 crons = ["*/15 * * * *", "27 3 * * *"]
 
@@ -152,6 +174,14 @@ migrations_dir = "migrations"
 [[env.preview.kv_namespaces]]
 binding = "KV"
 id = "00000000000000000000000000000000"
+
+[[env.preview.durable_objects.bindings]]
+name = "CONVERSATIONS"
+class_name = "ConversationRoom"
+
+[[env.preview.migrations]]
+tag = "v1"
+new_sqlite_classes = ["ConversationRoom"]
 
 [env.preview.observability]
 enabled = true

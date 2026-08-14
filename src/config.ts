@@ -111,6 +111,7 @@ export const LIMITS = {
   postTitleMax: 160,
   postContentMax: 40_000,
   commentContentMax: 4_000,
+  messageContentMax: 4_000,
   commentMaxDepth: 4, // 0-indexed → 5 visual levels
   tagsPerPost: 8,
   mediaPerPost: 8,

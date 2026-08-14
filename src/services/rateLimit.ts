@@ -49,6 +49,8 @@ export const RATE_TIERS = {
   upload: { name: 'upload', limit: 20, windowSeconds: 3600 },
   /** Search hits FTS5 and is comparatively costly. */
   search: { name: 'search', limit: 60, windowSeconds: 60 },
+  /** Chat: chattier than a generic write, still bounded. */
+  sendMessage: { name: 'send_message', limit: 120, windowSeconds: 60 },
   /** Reports: prevent moderation-queue flooding. */
   report: { name: 'report', limit: 10, windowSeconds: 3600 },
 } as const satisfies Record<string, RateLimitTier>;

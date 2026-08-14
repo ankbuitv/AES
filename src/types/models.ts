@@ -309,6 +309,26 @@ export interface NotificationDTO {
   actor: Pick<PublicUser, 'id' | 'username' | 'displayName' | 'avatarMediaId'> | null;
 }
 
+export type MessagePeer = Pick<PublicUser, 'id' | 'username' | 'displayName' | 'avatarMediaId'>;
+
+export interface MessageDTO {
+  id: string;
+  conversationId: string;
+  content: string;
+  createdAt: number;
+  /** True when the signed-in viewer wrote it — drives the bubble alignment. */
+  mine: boolean;
+  sender: MessagePeer;
+}
+
+export interface ConversationDTO {
+  id: string;
+  updatedAt: number;
+  peer: MessagePeer & { role: UserRole };
+  lastMessage: { content: string; createdAt: number; mine: boolean } | null;
+  unreadCount: number;
+}
+
 export interface MediaDTO {
   id: string;
   mimeType: string;

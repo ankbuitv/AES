@@ -18,6 +18,7 @@ import { AuditRepository, ReportRepository, StatsRepository } from './moderation
 import { CategoryRepository, SettingsRepository, TagRepository } from './tags';
 import { MentionRepository } from './mentions';
 import { ExtraRepository } from './extras';
+import { MessageRepository } from './messages';
 
 export interface Repositories {
   db: Db;
@@ -38,6 +39,7 @@ export interface Repositories {
   settings: SettingsRepository;
   mentions: MentionRepository;
   extras: ExtraRepository;
+  messages: MessageRepository;
 }
 
 export function createRepositories(d1: D1Database): Repositories {
@@ -61,6 +63,7 @@ export function createRepositories(d1: D1Database): Repositories {
     settings: new SettingsRepository(db),
     mentions: new MentionRepository(db),
     extras: new ExtraRepository(db),
+    messages: new MessageRepository(db),
   };
 }
 
@@ -74,3 +77,4 @@ export * from './notifications';
 export * from './moderation';
 export * from './tags';
 export * from './mentions';
+export * from './messages';
