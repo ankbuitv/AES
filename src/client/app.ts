@@ -717,7 +717,17 @@ async function submitAvatarForm(form: HTMLFormElement): Promise<void> {
     const upload = new FormData();
     upload.set('file', file);
     upload.set('usage', 'avatar');
-    await api('/api/media/upload', { method: 'POST', body: upload });
+    const data = await api<{ media: { id: string } }>('/api/media/upload', {
+      method: 'POST',
+      body: upload,
+    });
+    // Upload-with-usage=avatar already pins the profile image server-side.
+    // Re-assert it here so a stale client still lands on the new picture.
+    if (data.media?.id) {
+      const pin = new FormData();
+      pin.set('avatarMediaId', data.media.id);
+      await api('/api/me/profile', { method: 'PATCH', body: pin });
+    }
     location.reload();
   } catch (error) {
     showFormError(form, error instanceof Error ? error.message : 'Could not upload');
@@ -1368,6 +1378,8 @@ interface MessageLike {
   durationMs?: number;
   createdAt: number;
   mine: boolean;
+  /** Present on the author's own send so the socket echo can replace the pending bubble. */
+  clientId?: string;
   sender: { id: string; username: string; displayName: string; avatarMediaId: string | null };
 }
 
@@ -1434,7 +1446,11 @@ function renderBubble(message: MessageLike, pending = false): string {
 
   return `<li class="bubble ${message.mine ? 'bubble--mine' : ''} ${
     message.kind === 'sticker' ? 'bubble--sticker' : ''
-  } ${pending ? 'bubble--pending' : ''}" data-message-id="${escapeHtml(message.id)}">
+  } ${pending ? 'bubble--pending' : ''}" data-message-id="${escapeHtml(message.id)}"${
+    pending ? ` data-pending="1" data-client-id="${escapeHtml(message.id)}"` : ''
+  }${
+    message.clientId && !pending ? ` data-client-id="${escapeHtml(message.clientId)}"` : ''
+  }>
     ${avatar}
     <div class="bubble__body">
       ${renderBubbleContent(message)}
@@ -1677,17 +1693,34 @@ function initThread(): void {
     if (status) status.textContent = text;
   };
 
-  const append = (message: MessageLike): boolean => {
-    if (seen.has(message.id)) return false;
-    // A message we just sent is already on screen as an optimistic bubble.
-    const optimistic = list.querySelector<HTMLElement>(`[data-pending-for="${CSS.escape(message.id)}"]`);
-    seen.add(message.id);
-    const stick = atBottom();
-    if (optimistic) {
-      optimistic.outerHTML = renderBubble(message);
-    } else {
-      list.insertAdjacentHTML('beforeend', renderBubble(message));
+  /** Broadcasts leave `mine` false; always re-derive it from the sender id. */
+  const asOwn = (message: MessageLike): MessageLike => ({
+    ...message,
+    mine: Boolean(boot.user?.id && message.sender?.id === boot.user.id),
+  });
+
+  const append = (incoming: MessageLike): boolean => {
+    const message = asOwn(incoming);
+    if (message.id && seen.has(message.id)) return false;
+
+    // The author already drew an optimistic bubble. Match it by clientId
+    // (preferred) or by the single pending outgoing row, so a socket echo
+    // cannot appear as a second incoming line from the other person.
+    const pending =
+      (message.clientId
+        ? list.querySelector<HTMLElement>(`[data-client-id="${CSS.escape(message.clientId)}"]`)
+        : null) ??
+      (message.mine ? list.querySelector<HTMLElement>('.bubble--pending.bubble--mine') : null);
+
+    if (pending) {
+      if (message.id) seen.add(message.id);
+      pending.outerHTML = renderBubble(message);
+      return false;
     }
+
+    if (message.id) seen.add(message.id);
+    const stick = atBottom();
+    list.insertAdjacentHTML('beforeend', renderBubble(message));
     if (stick) toBottom();
     return true;
   };
@@ -1756,7 +1789,8 @@ function initThread(): void {
         case 'message': {
           const message = frame.message;
           if (!message || message.conversationId !== conversationId) return;
-          if (append(message) && !message.mine) {
+          const added = append(message);
+          if (added && !asOwn(message).mine) {
             if (document.hidden) void refreshMessagesBadge();
             else markRead();
           }
@@ -1840,8 +1874,8 @@ function initThread(): void {
         { method: 'POST', body },
       );
       seen.add(data.message.id);
-      if (node) {
-        node.outerHTML = renderBubble(data.message);
+      if (node?.isConnected) {
+        node.outerHTML = renderBubble({ ...data.message, mine: true, clientId });
       }
       // The catch-up pass advances `latestCursor` past this message; `seen`
       // keeps it from being appended twice in the meantime.
@@ -1909,7 +1943,7 @@ function initThread(): void {
         { method: 'POST', body },
       );
       seen.add(data.message.id);
-      if (node) node.outerHTML = renderBubble(data.message);
+      if (node?.isConnected) node.outerHTML = renderBubble({ ...data.message, mine: true, clientId });
       void catchUp();
     } catch (error) {
       node?.classList.add('bubble--failed');
@@ -2131,7 +2165,7 @@ function initThread(): void {
   // Grow the composer with its content, up to a few lines.
   input?.addEventListener('input', () => {
     input.style.height = 'auto';
-    input.style.height = `${Math.min(160, input.scrollHeight)}px`;
+    input.style.height = `${Math.min(256, Math.max(92, input.scrollHeight))}px`;
 
     const now = Date.now();
     if (socket?.readyState === WebSocket.OPEN && now - lastTypingSent > 2_000) {
@@ -2243,44 +2277,112 @@ function initMessages(): void {
  *
  * The page already works without this: each reel is a `<video controls>` or a
  * platform iframe, and "load more" is an ordinary link. The upgrades here are
- * the ones that make a vertical feed feel right — play the reel in view, pause
- * the ones that are not, like without a reload, and append the next page in
- * place. Embedded reels are left entirely alone: their playback belongs to the
- * platform inside the iframe, which we cannot (and must not) script.
+ * the ones that make a vertical feed feel right — start fetching the reel the
+ * reader is looking at (or just tapped), cover the platform spinner with a
+ * poster until the first frame is ready, pause the ones that are off-screen,
+ * like without a reload, and append the next page in place.
  */
 function initReels(): void {
   const feed = $<HTMLElement>('[data-reel-feed]');
   if (!feed) return;
 
-  // Autoplay only what the reader is actually looking at, so a long feed does
-  // not decode a dozen videos at once.
+  const markReady = (stage: HTMLElement) => {
+    stage.classList.add('is-ready');
+  };
+
+  const activate = (stage: HTMLElement, play: boolean) => {
+    stage.classList.add('is-active');
+
+    const video = stage.querySelector<HTMLVideoElement>('[data-reel-video]');
+    if (video) {
+      video.preload = 'auto';
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) markReady(stage);
+      else {
+        video.addEventListener('loadeddata', () => markReady(stage), { once: true });
+        video.addEventListener('canplay', () => markReady(stage), { once: true });
+        video.addEventListener('playing', () => markReady(stage), { once: true });
+      }
+      if (play) video.play().catch(() => undefined);
+      else video.load();
+      return;
+    }
+
+    const iframe = stage.querySelector<HTMLIFrameElement>('[data-reel-embed]');
+    if (!iframe) return;
+    const src = iframe.dataset.src || iframe.getAttribute('src') || '';
+    if (src && iframe.getAttribute('src') !== src) {
+      iframe.setAttribute('src', src);
+    }
+    iframe.addEventListener('load', () => markReady(stage), { once: true });
+    // Hide the poster shortly after the iframe is asked to load so the
+    // YouTube spinner never shows through.
+    if (iframe.getAttribute('src')) {
+      window.setTimeout(() => {
+        if (stage.classList.contains('is-active')) markReady(stage);
+      }, 900);
+    }
+  };
+
+  const pauseOthers = (keep: HTMLElement | null) => {
+    for (const stage of $$<HTMLElement>('[data-reel-stage]', feed)) {
+      if (stage === keep) continue;
+      stage.querySelector<HTMLVideoElement>('[data-reel-video]')?.pause();
+    }
+  };
+
+  feed.addEventListener('pointerdown', (event) => {
+    const stage = (event.target as Element | null)?.closest<HTMLElement>('[data-reel-stage]');
+    if (!stage) return;
+    activate(stage, true);
+    pauseOthers(stage);
+  });
+
   if ('IntersectionObserver' in window) {
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          const video = entry.target as HTMLVideoElement;
-          if (entry.isIntersecting && entry.intersectionRatio > 0.6) {
-            video.play().catch(() => undefined);
+          const stage = entry.target as HTMLElement;
+          if (entry.isIntersecting && entry.intersectionRatio > 0.55) {
+            activate(stage, true);
+            pauseOthers(stage);
           } else {
-            video.pause();
+            stage.querySelector<HTMLVideoElement>('[data-reel-video]')?.pause();
           }
         }
       },
-      { threshold: [0, 0.6, 1] },
+      { threshold: [0, 0.55, 1], rootMargin: '40% 0px' },
     );
-    for (const video of $$<HTMLVideoElement>('[data-reel-video]', feed)) observer.observe(video);
 
-    // Videos appended later need observing too.
+    const watch = (root: ParentNode) => {
+      for (const stage of $$<HTMLElement>('[data-reel-stage]', root)) observer.observe(stage);
+    };
+    watch(feed);
+
     const mutations = new MutationObserver((records) => {
       for (const record of records) {
         for (const node of Array.from(record.addedNodes)) {
-          if (!(node instanceof HTMLElement)) continue;
-          for (const video of $$<HTMLVideoElement>('[data-reel-video]', node)) observer.observe(video);
+          if (node instanceof HTMLElement) watch(node);
         }
       }
     });
     mutations.observe(feed, { childList: true });
   }
+
+  const first = $<HTMLElement>('[data-reel-stage]', feed);
+  if (first) activate(first, true);
+
+  window.addEventListener('message', (event) => {
+    const host = String(event.origin || '').replace(/^https?:\/\//, '');
+    if (!/(?:^|\.)youtube(?:-nocookie)?\.com$/.test(host)) return;
+    let payload: { event?: string } | null = null;
+    try {
+      payload = typeof event.data === 'string' ? (JSON.parse(event.data) as { event?: string }) : (event.data as { event?: string });
+    } catch {
+      return;
+    }
+    if (payload?.event !== 'onReady' && payload?.event !== 'infoDelivery') return;
+    for (const stage of $$<HTMLElement>('[data-reel-stage].is-active', feed)) markReady(stage);
+  });
 
   // Likes: optimistic, then corrected by the authoritative count.
   document.addEventListener('submit', (event) => {
@@ -2366,18 +2468,50 @@ interface ReelLike {
 }
 
 /** Client-side twin of the SSR reel card. Everything is escaped. */
+/** Mirror of `playableEmbedUrl` so "load more" cards autoplay when activated. */
+function playableEmbed(embedUrl: string): string {
+  try {
+    const url = new URL(embedUrl, location.origin);
+    const host = url.hostname.replace(/^www\./, '');
+    if (host === 'youtube-nocookie.com' || host === 'youtube.com') {
+      url.searchParams.set('autoplay', '1');
+      url.searchParams.set('mute', '1');
+      url.searchParams.set('playsinline', '1');
+      url.searchParams.set('rel', '0');
+      url.searchParams.set('modestbranding', '1');
+      url.searchParams.set('iv_load_policy', '3');
+      url.searchParams.set('enablejsapi', '1');
+    } else if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) {
+      url.searchParams.set('autoplay', '1');
+    } else if (host === 'facebook.com' || host.endsWith('.facebook.com')) {
+      url.searchParams.set('autoplay', 'true');
+    }
+    return url.toString();
+  } catch {
+    return embedUrl;
+  }
+}
+
 function renderReelCard(reel: ReelLike): string {
   const token = csrfToken();
+  const poster = reel.posterUrl
+    ? `<button class="reel__poster" type="button" data-reel-poster data-reel-activate style="background-image:url('${escapeHtml(
+        reel.posterUrl,
+      )}')" aria-label="Play reel"><span class="reel__play" aria-hidden="true"></span></button>`
+    : `<button class="reel__poster reel__poster--plain" type="button" data-reel-poster data-reel-activate aria-label="Play reel"><span class="reel__play" aria-hidden="true"></span></button>`;
   const stage =
     reel.provider === 'upload' && reel.videoUrl
-      ? `<video class="reel__video" src="${escapeHtml(reel.videoUrl)}" playsinline loop muted controls
-           preload="none" data-reel-video></video>`
+      ? `${poster}<video class="reel__video" src="${escapeHtml(reel.videoUrl)}" ${
+          reel.posterUrl ? `poster="${escapeHtml(reel.posterUrl)}"` : ''
+        } playsinline loop muted controls preload="metadata" data-reel-video></video>`
       : reel.embedUrl
-        ? `<iframe class="reel__embed" src="${escapeHtml(reel.embedUrl)}" title="${escapeHtml(
+        ? `${poster}<iframe class="reel__embed" data-src="${escapeHtml(
+            playableEmbed(reel.embedUrl),
+          )}" title="${escapeHtml(
             reel.title || `${reel.providerLabel} video`,
           )}" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"
            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-           allowfullscreen></iframe>`
+           allowfullscreen data-reel-embed></iframe>`
         : '<div class="reel__missing muted">This video is no longer available.</div>';
 
   const avatar = reel.author.avatarMediaId
@@ -2399,7 +2533,7 @@ function renderReelCard(reel: ReelLike): string {
     : `<a class="reel__action" href="/login?next=/reels">\u2665 <span>${reel.likeCount}</span></a>`;
 
   return `<article class="reel" data-reel data-reel-id="${escapeHtml(reel.id)}">
-    <div class="reel__stage">${stage}</div>
+    <div class="reel__stage" data-reel-stage data-provider="${escapeHtml(reel.provider)}">${stage}</div>
     <div class="reel__meta">
       <div class="reel__author">
         ${avatar}

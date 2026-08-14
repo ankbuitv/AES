@@ -138,6 +138,7 @@ messages.post('/:id', rateLimit('sendMessage'), async (c) => {
     conversationId,
     senderId: viewer.id,
     content: input.content,
+    clientId: input.clientId,
   });
 
   const peer = await service.peerOf(conversationId, viewer.id);

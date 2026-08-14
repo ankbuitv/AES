@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { TestClient } from './helpers/client';
-import { parseReelUrl, posterFor } from '../src/services/reelSources';
+import { parseReelUrl, playableEmbedUrl, posterFor } from '../src/services/reelSources';
 import { contentSecurityPolicy } from '../src/middleware/security';
 
 interface ReelPayload {
@@ -99,6 +99,13 @@ describe('reel URL parsing', () => {
     ]) {
       expect(parseReelUrl(url), url).toBeNull();
     }
+  });
+
+  it('adds autoplay to the on-screen player URL without changing the stored embed', () => {
+    const parsed = parseReelUrl('https://www.youtube.com/shorts/dQw4w9WgXcQ');
+    expect(parsed?.embedUrl).not.toContain('autoplay=1');
+    expect(playableEmbedUrl(parsed!.embedUrl)).toContain('autoplay=1');
+    expect(playableEmbedUrl(parsed!.embedUrl)).toContain('mute=1');
   });
 
   it('builds the embed from the id, so query junk on the paste is discarded', () => {

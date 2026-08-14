@@ -130,6 +130,22 @@ describe('upload', () => {
     expect(result.status).toBe(415);
   });
 
+  it('pins an avatar upload to the user profile', async () => {
+    const client = await authed('face');
+    const result = await client.upload<MediaPayload>(
+      '/api/media/upload',
+      { name: 'face.png', type: 'image/png', bytes: TINY_PNG },
+      { usage: 'avatar' },
+    );
+    expect(result.status).toBe(201);
+    const mediaId = result.body.data!.media.id;
+
+    const row = client.env.db.sqlite
+      .prepare('SELECT avatar_media_id FROM users WHERE username = ?')
+      .get('face') as { avatar_media_id: string | null };
+    expect(row.avatar_media_id).toBe(mediaId);
+  });
+
   it('deduplicates identical bytes for the same owner', async () => {
     const client = await authed('duper');
 

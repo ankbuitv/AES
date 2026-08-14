@@ -2952,22 +2952,24 @@ body.is-reader .shell {
 .chatbox {
   display: flex;
   align-items: flex-end;
-  gap: 0.5rem;
-  padding: 0.7rem 0.9rem 0.35rem;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem 0.45rem;
   border-top: 1px solid var(--border);
 }
 
 .chatbox__input {
   flex: 1 1 auto;
-  min-height: 2.5rem;
-  max-height: 10rem;
-  padding: 0.55rem 0.8rem;
+  min-height: 5.75rem;
+  max-height: 16rem;
+  padding: 0.85rem 1rem;
   border: 1px solid var(--border-strong);
-  border-radius: 1.2rem;
+  border-radius: 1rem;
   background: var(--bg);
   color: var(--text);
   font: inherit;
-  resize: none;
+  font-size: 1.05rem;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .chatbox__input:focus-visible {
@@ -2977,7 +2979,11 @@ body.is-reader .shell {
 
 .chatbox__send {
   flex: none;
+  align-self: flex-end;
+  min-height: 2.85rem;
+  padding: 0.7rem 1.25rem;
   border-radius: 999px;
+  font-size: 1rem;
 }
 
 .chatbox__hint {
@@ -3380,6 +3386,58 @@ html[data-theme='dark'] .accountpop__item .theme-toggle__moon {
 .reel__video {
   object-fit: contain;
   background: #05060a;
+}
+
+/*
+ * Poster sits on top of the iframe/video until the first frame is ready, so
+ * the YouTube red spinner never flashes. Tapping the poster starts the fetch.
+ */
+.reel__poster {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  background-color: #05060a;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  transition: opacity 0.18s ease;
+}
+
+.reel__poster--plain {
+  background-image: linear-gradient(160deg, #161821, #05060a 70%);
+}
+
+.reel__play {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 4.2rem;
+  height: 4.2rem;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 46%);
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 35%);
+}
+
+.reel__play::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 54%;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 10px 0 10px 16px;
+  border-color: transparent transparent transparent #fff;
+  transform: translate(-50%, -50%);
+}
+
+.reel__stage.is-ready .reel__poster {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .reel__missing {
