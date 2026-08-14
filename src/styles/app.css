@@ -3617,9 +3617,34 @@ html[data-theme='dark'] .accountpop__item .theme-toggle__moon {
   text-align: left;
 }
 
-/* The chat column gets more room: a bigger thread is the point of the page. */
+/* The chat column gets more room: a bigger thread is the point of the page.
+   The regular centre column is capped at the reading width used by posts. That
+   cap made the two-pane messenger only 700px wide (and left the actual chat at
+   roughly 360px), even on a large display. Messenger is an application view,
+   not a reading view, so let it use the rail's space and the full shell width. */
+@media (min-width: 761px) {
+  .shell:has(.messenger) {
+    max-width: 1440px;
+    grid-template-columns: var(--side-width) minmax(0, 1fr);
+  }
+
+  .shell:has(.messenger) .rail {
+    display: none;
+  }
+}
+
+.main:has(.messenger) {
+  max-width: none;
+}
+
 .messenger {
   min-height: min(82vh, 52rem);
+}
+
+@media (min-width: 861px) {
+  .messenger {
+    grid-template-columns: minmax(16rem, 19rem) minmax(0, 1fr);
+  }
 }
 
 .messenger__thread {
