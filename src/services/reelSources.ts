@@ -156,6 +156,35 @@ function youtube(id: string): ParsedReelSource {
 }
 
 /**
+ * Playback URL used once a reel is on screen. Autoplay + mute starts the
+ * fetch immediately without the platform's big play button; the page still
+ * stores the quieter canonical embed from `parseReelUrl`.
+ */
+export function playableEmbedUrl(embedUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(embedUrl);
+  } catch {
+    return embedUrl;
+  }
+  const name = url.hostname.replace(/^www\./, '').toLowerCase();
+  if (name === 'youtube-nocookie.com' || name === 'youtube.com') {
+    url.searchParams.set('autoplay', '1');
+    url.searchParams.set('mute', '1');
+    url.searchParams.set('playsinline', '1');
+    url.searchParams.set('rel', '0');
+    url.searchParams.set('modestbranding', '1');
+    url.searchParams.set('iv_load_policy', '3');
+    url.searchParams.set('enablejsapi', '1');
+  } else if (name === 'tiktok.com' || name.endsWith('.tiktok.com')) {
+    url.searchParams.set('autoplay', '1');
+  } else if (name === 'facebook.com' || name.endsWith('.facebook.com')) {
+    url.searchParams.set('autoplay', 'true');
+  }
+  return url.toString();
+}
+
+/**
  * Poster frame for an embedded reel, where the platform exposes a stable
  * thumbnail URL. Only YouTube does without an API call; the others fall back to
  * a gradient placeholder rendered in CSS.

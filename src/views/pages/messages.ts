@@ -402,7 +402,7 @@ export function renderConversationPage(input: MessagesPageInput): string {
             </div>
 
             <label class="sr-only" for="message-input">Message ${peerName}</label>
-            <textarea id="message-input" class="chatbox__input" name="content" rows="1" required
+            <textarea id="message-input" class="chatbox__input" name="content" rows="4" required
                       maxlength="4000" placeholder="Write a message…" autocomplete="off"></textarea>
             <button class="btn btn--primary chatbox__send" type="submit">Send</button>
           </form>

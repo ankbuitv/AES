@@ -207,6 +207,8 @@ export class MessageService {
     kind?: MessageKind;
     mediaId?: string | null;
     durationMs?: number;
+    /** Echoed on the socket so the sender can reconcile its optimistic bubble. */
+    clientId?: string;
   }): Promise<MessageDTO> {
     const kind: MessageKind = options.kind ?? 'text';
     // Text bubbles must carry text; attachment bubbles fall back to a short
@@ -232,7 +234,7 @@ export class MessageService {
 
     // Fan-out happens after the response is on its way: a socket that misses
     // the push still catches up on its next poll or reconnect.
-    this.ctx.defer(this.deliver(options.conversationId, row));
+    this.ctx.defer(this.deliver(options.conversationId, row, options.clientId));
 
     return dto;
   }
@@ -241,17 +243,20 @@ export class MessageService {
    * Best-effort push to the conversation's Durable Object. Never throws: this
    * is an optimisation over the durable D1 write, not a second source of truth.
    */
-  async deliver(conversationId: string, row: MessageRow): Promise<void> {
+  async deliver(conversationId: string, row: MessageRow, clientId?: string): Promise<void> {
     const namespace = this.ctx.env.CONVERSATIONS;
     if (!namespace) return;
     try {
       const stub = namespace.get(namespace.idFromName(conversationId));
+      // `mine` is left false here: each client re-derives it from sender.id.
+      // `clientId` lets the author replace the optimistic bubble when this
+      // push races the HTTP response (otherwise they see their own line twice).
       await stub.fetch('https://conversation.internal/broadcast', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           type: 'message',
-          message: toMessageDTO(row, ''),
+          message: { ...toMessageDTO(row, ''), clientId: clientId || undefined },
         }),
       });
     } catch (error) {

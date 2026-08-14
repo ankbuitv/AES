@@ -211,6 +211,10 @@ describe('thread history', () => {
     );
     expect(sent.body.data!.clientId).toBe('tmp-123');
     expect(sent.body.data!.message.id).toMatch(/^msg_/);
+    // The author always sees their own send as mine; a broadcast with mine=false
+    // is the client's job to re-derive from sender.id.
+    expect(sent.body.data!.message.mine).toBe(true);
+    expect(sent.body.data!.message.sender.username).toBe('quin');
   });
 });
 

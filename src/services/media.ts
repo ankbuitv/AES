@@ -122,7 +122,9 @@ export class MediaService {
     const existing = await repos.media.findByChecksum(input.owner.id, checksum);
     if (existing) {
       if (usage !== existing.usage_context) await repos.media.attachToUsage(existing.id, usage);
-      return toMediaDTO({ ...existing, usage_context: usage });
+      const dto = toMediaDTO({ ...existing, usage_context: usage });
+      await this.applyProfileUsage(input.owner, dto.id, usage);
+      return dto;
     }
 
     // 5. Upload under a key we generated. The client filename is metadata only.
@@ -176,7 +178,9 @@ export class MediaService {
       // Derived variants are produced out-of-band; see `generateVariants`.
       this.ctx.defer(this.ctx.repos.jobs.enqueue('media_variants', { mediaId: row.id }));
 
-      return toMediaDTO(row);
+      const dto = toMediaDTO(row);
+      await this.applyProfileUsage(input.owner, dto.id, usage);
+      return dto;
     } catch (error) {
       this.ctx.defer(repos.media.enqueueCleanup(key, storage.name, 'metadata_insert_failed'));
       throw error;
@@ -429,6 +433,20 @@ export class MediaService {
         }),
       );
     }
+  }
+
+  /**
+   * Uploading with `usage=avatar` (or cover) must actually become the profile
+   * picture. The settings form posts straight to `/api/media/upload`; without
+   * this hook the file lands in the library and the initials chip stays put.
+   */
+  private async applyProfileUsage(
+    viewer: AuthUser,
+    mediaId: string,
+    usage: MediaUsage,
+  ): Promise<void> {
+    if (usage !== 'avatar' && usage !== 'cover') return;
+    await this.setProfileImage({ viewer, mediaId, kind: usage });
   }
 
   /** Set (or clear) a user's avatar/cover from an owned media id. */

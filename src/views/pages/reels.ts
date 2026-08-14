@@ -13,6 +13,7 @@
 
 import { html, raw } from '../../utils/html';
 import type { Page, ReelDTO } from '../../types/models';
+import { playableEmbedUrl } from '../../services/reelSources';
 import { relativeTime, toIso } from '../../utils/time';
 import { avatar } from '../components/avatar';
 import { emptyState } from '../components/post';
@@ -26,22 +27,35 @@ export interface ReelsPageInput {
 }
 
 /**
- * The video surface. Uploads are streamed through our media gateway; embeds get
- * the platform iframe with a lazy loader so opening the page does not fire one
- * request per network.
+ * The video surface.
+ *
+ * The first reel in the feed starts fetching immediately (preload / eager
+ * iframe). Later ones keep a poster until they enter view or are tapped, so
+ * opening the page does not spawn a YouTube spinner on every card.
  */
-function player(reel: ReelDTO): string {
+function player(reel: ReelDTO, eager: boolean): string {
+  const poster = reel.posterUrl || '';
+  const posterEl = html`
+    <button class="reel__poster ${poster ? '' : 'reel__poster--plain'}" type="button"
+            data-reel-poster data-reel-activate
+            ${poster ? raw(html`style="background-image:url('${poster}')"`) : ''}
+            aria-label="Play reel">
+      <span class="reel__play" aria-hidden="true"></span>
+    </button>
+  `;
+
   if (reel.provider === 'upload' && reel.videoUrl) {
     return html`
+      ${raw(posterEl)}
       <video
         class="reel__video"
         src="${reel.videoUrl}"
-        ${reel.posterUrl ? raw(html`poster="${reel.posterUrl}"`) : ''}
+        ${poster ? raw(html`poster="${poster}"`) : ''}
         playsinline
         loop
         muted
         controls
-        preload="none"
+        preload="${eager ? 'auto' : 'metadata'}"
         data-reel-video
       ></video>
     `;
@@ -51,23 +65,30 @@ function player(reel: ReelDTO): string {
     return html`<div class="reel__missing muted">This video is no longer available.</div>`;
   }
 
+  const playable = playableEmbedUrl(reel.embedUrl);
   return html`
+    ${raw(posterEl)}
     <iframe
       class="reel__embed"
-      src="${reel.embedUrl}"
+      ${eager ? raw(html`src="${playable}"`) : ''}
+      data-src="${playable}"
       title="${reel.title || `${reel.providerLabel} video by @${reel.author.username}`}"
-      loading="lazy"
+      loading="${eager ? 'eager' : 'lazy'}"
       referrerpolicy="strict-origin-when-cross-origin"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
       allowfullscreen
+      data-reel-embed
     ></iframe>
   `;
 }
 
-function reelCard(reel: ReelDTO, csrfToken: string | null, signedIn: boolean): string {
+function reelCard(reel: ReelDTO, csrfToken: string | null, signedIn: boolean, eager: boolean): string {
   return html`
     <article class="reel" data-reel data-reel-id="${reel.id}" aria-label="${reel.title || 'Reel'}">
-      <div class="reel__stage">${raw(player(reel))}</div>
+      <div class="reel__stage ${eager ? 'is-active' : ''}" data-reel-stage
+           data-provider="${reel.provider}" data-poster="${reel.posterUrl || ''}">
+        ${raw(player(reel, eager))}
+      </div>
 
       <div class="reel__meta">
         <div class="reel__author">
@@ -196,7 +217,7 @@ export function renderReelsPage(input: ReelsPageInput): string {
     ${page.items.length
       ? raw(html`
           <div class="reelfeed" data-reel-feed>
-            ${page.items.map((reel) => raw(reelCard(reel, input.csrfToken, input.signedIn)))}
+            ${page.items.map((reel, index) => raw(reelCard(reel, input.csrfToken, input.signedIn, index === 0)))}
           </div>
           ${page.hasMore && page.nextCursor
             ? raw(html`
