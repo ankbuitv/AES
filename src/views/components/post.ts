@@ -30,10 +30,12 @@ function mediaGrid(post: PostDTO): RawHtml {
           <figure class="mediagrid__item">
             ${m.mimeType.startsWith('video/')
               ? raw(html`<video class="mediagrid__video" src="${m.url}" controls playsinline preload="metadata"></video>`)
-              : raw(html`<a href="${m.url}" data-lightbox>
+              : raw(html`<a class="mediagrid__link" href="${m.url}" data-lightbox
+                 title="${m.altText || 'Open image'}" aria-label="${m.altText || 'Open image'}">
               <img src="${m.thumbUrl}" alt="${m.altText || 'Attached image'}"
                    ${m.width ? raw(`width="${m.width}"`) : ''} ${m.height ? raw(`height="${m.height}"`) : ''}
                    loading="lazy" decoding="async">
+              <span class="mediagrid__broken" aria-hidden="true">Image unavailable</span>
             </a>`)}
             ${m.altText ? raw(html`<figcaption class="sr-only">${m.altText}</figcaption>`) : ''}
           </figure>`),

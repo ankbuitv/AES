@@ -38,6 +38,10 @@ const CONTENT_TYPES: { value: PostContentType; label: string; hint: string }[] =
 export function renderComposePage(input: ComposePageInput): string {
   const draft = input.draft ?? {};
   const selectedType = draft.contentType ?? 'markdown';
+  // Re-editing after a validation error must not hide a value the user already
+  // typed, so the panel starts open whenever one of its fields is populated.
+  const optionsFilled = Boolean(draft.category || draft.tags || draft.linkUrl || draft.codeLanguage ||
+    (draft.visibility && draft.visibility !== 'public'));
 
   if (!input.csrfToken) {
     return html`
@@ -90,18 +94,6 @@ export function renderComposePage(input: ComposePageInput): string {
       </div>
 
       <div class="field">
-        <label for="linkUrl">Link URL <span class="muted">(link posts)</span></label>
-        <input id="linkUrl" name="linkUrl" type="url" maxlength="2000" value="${draft.linkUrl ?? ''}"
-               placeholder="https://example.com/article">
-      </div>
-
-      <div class="field">
-        <label for="codeLanguage">Code language <span class="muted">(code posts)</span></label>
-        <input id="codeLanguage" name="codeLanguage" type="text" maxlength="24" value="${draft.codeLanguage ?? ''}"
-               placeholder="typescript" autocapitalize="none" spellcheck="false">
-      </div>
-
-      <div class="field">
         <label class="filebtn" for="compose-image">
           <input id="compose-image" type="file" name="image" accept="image/png,image/jpeg,image/webp,image/gif"
                  multiple data-composer-file>
@@ -111,45 +103,77 @@ export function renderComposePage(input: ComposePageInput): string {
         <ul class="composer__attachments" data-composer-attachments></ul>
       </div>
 
-      <div class="composer__row">
-        <div class="field">
-          <label for="category">Category</label>
-          <select id="category" name="category">
-            <option value="">No category</option>
-            ${input.categories.map(
-              (category) => raw(html`
-                <option value="${category.slug}" ${category.slug === draft.category ? raw('selected') : ''}>
-                  ${category.name}
-                </option>`),
-            )}
-          </select>
-        </div>
+      <!--
+        Optional metadata is collapsed by default so the editor opens on the
+        two fields that matter: type and body. <details> works without
+        JavaScript and collapsed fields are still submitted, so nothing is
+        lost. It is force-opened when a draft already filled one of them, so a
+        failed submit never hides the value the user typed.
+      -->
+      <details class="composer__more" ${optionsFilled ? raw('open') : ''}>
+        <summary class="composer__more-summary">
+          <span class="composer__more-label">More options</span>
+          <span class="composer__more-hint muted">Category, tags, visibility, link, code language, poll, schedule</span>
+        </summary>
 
-        <div class="field">
-          <label for="tags">Tags</label>
-          <input id="tags" name="tags" type="text" value="${draft.tags ?? ''}"
-                 placeholder="design, workers, d1" autocapitalize="none" spellcheck="false">
-          <p class="field__hint">Separate with commas. Up to ${LIMITS.tagsPerPost}.</p>
-        </div>
+        <div class="composer__more-body">
+          <div class="composer__row">
+            <div class="field">
+              <label for="category">Category</label>
+              <select id="category" name="category">
+                <option value="">No category</option>
+                ${input.categories.map(
+                  (category) => raw(html`
+                    <option value="${category.slug}" ${category.slug === draft.category ? raw('selected') : ''}>
+                      ${category.name}
+                    </option>`),
+                )}
+              </select>
+            </div>
 
-        <div class="field">
-          <label for="visibility">Visibility</label>
-          <select id="visibility" name="visibility">
-            <option value="public" ${draft.visibility === 'public' || !draft.visibility ? raw('selected') : ''}>Public</option>
-            <option value="followers" ${draft.visibility === 'followers' ? raw('selected') : ''}>Followers only</option>
-            <option value="private" ${draft.visibility === 'private' ? raw('selected') : ''}>Only me</option>
-          </select>
-        </div>
-      </div>
+            <div class="field">
+              <label for="tags">Tags</label>
+              <input id="tags" name="tags" type="text" value="${draft.tags ?? ''}"
+                     placeholder="design, workers, d1" autocapitalize="none" spellcheck="false">
+              <p class="field__hint">Separate with commas. Up to ${LIMITS.tagsPerPost}.</p>
+            </div>
 
-      <div class="field">
-        <label for="pollOptions">Poll options <span class="muted">(one per line, optional)</span></label>
-        <textarea id="pollOptions" name="pollOptions" rows="4" maxlength="400" placeholder="Yes&#10;No&#10;Maybe"></textarea>
-      </div>
-      <div class="field">
-        <label for="scheduledAt">Schedule publish</label>
-        <input id="scheduledAt" name="scheduledAt" type="datetime-local">
-      </div>
+            <div class="field">
+              <label for="visibility">Visibility</label>
+              <select id="visibility" name="visibility">
+                <option value="public" ${draft.visibility === 'public' || !draft.visibility ? raw('selected') : ''}>Public</option>
+                <option value="followers" ${draft.visibility === 'followers' ? raw('selected') : ''}>Followers only</option>
+                <option value="private" ${draft.visibility === 'private' ? raw('selected') : ''}>Only me</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="composer__row">
+            <div class="field">
+              <label for="linkUrl">Link URL <span class="muted">(link posts)</span></label>
+              <input id="linkUrl" name="linkUrl" type="url" maxlength="2000" value="${draft.linkUrl ?? ''}"
+                     placeholder="https://example.com/article">
+            </div>
+
+            <div class="field">
+              <label for="codeLanguage">Code language <span class="muted">(code posts)</span></label>
+              <input id="codeLanguage" name="codeLanguage" type="text" maxlength="24" value="${draft.codeLanguage ?? ''}"
+                     placeholder="typescript" autocapitalize="none" spellcheck="false">
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="pollOptions">Poll options <span class="muted">(one per line, optional)</span></label>
+            <textarea id="pollOptions" name="pollOptions" rows="4" maxlength="400" placeholder="Yes&#10;No&#10;Maybe"></textarea>
+          </div>
+
+          <div class="field">
+            <label for="scheduledAt">Schedule publish</label>
+            <input id="scheduledAt" name="scheduledAt" type="datetime-local">
+          </div>
+        </div>
+      </details>
+
       <div class="composer__foot">
         <button class="btn btn--ghost" type="submit" name="status" value="draft">Save draft</button>
         <button class="btn btn--primary" type="submit" name="status" value="published">Publish</button>

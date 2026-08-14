@@ -112,6 +112,25 @@ describe('server-side rendering', () => {
     expect(missing.body).toContain('404');
   });
 
+  it('collapses the optional composer fields behind a disclosure that still submits them', async () => {
+    const client = new TestClient();
+    await client.register({ username: 'composerui' });
+
+    for (const path of ['/', '/compose']) {
+      const { body } = await html(client, path);
+      expect(body).toContain('class="composer__more"');
+      expect(body).toContain('More options');
+      // Collapsed, not removed: the inputs are still inside the form, so a
+      // no-JS submit carries them.
+      expect(body).toContain('name="tags"');
+      expect(body).toContain('name="visibility"');
+      expect(body).toContain('name="pollOptions"');
+      // The essentials stay outside the panel.
+      const beforeDetails = body.slice(0, body.indexOf('composer__more'));
+      expect(beforeDetails).toContain('data-composer-content');
+    }
+  });
+
   it('redirects an anonymous visitor away from private pages', async () => {
     const client = new TestClient();
 

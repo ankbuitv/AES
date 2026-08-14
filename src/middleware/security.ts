@@ -24,6 +24,11 @@ import type { AppContext } from '../types/env';
  */
 export function contentSecurityPolicy(nonce: string, origin: string): string {
   const self = "'self'";
+  // Live chat opens a WebSocket back to this same origin. `connect-src` covers
+  // WebSockets, and a `ws(s):` URL is not matched by `'self'` in every browser,
+  // so the scheme twins of the origin are listed explicitly rather than
+  // allowing a blanket `wss:`.
+  const socketOrigins = websocketOrigins(origin);
   return [
     `default-src ${self}`,
     `base-uri ${self}`,
@@ -32,13 +37,25 @@ export function contentSecurityPolicy(nonce: string, origin: string): string {
     `img-src ${self} data: blob:`,
     `media-src ${self}`,
     `font-src ${self} data:`,
-    `connect-src ${self} ${origin}`,
+    `connect-src ${self} ${origin}${socketOrigins}`,
     `form-action ${self}`,
     `frame-ancestors 'none'`,
     `object-src 'none'`,
     `manifest-src ${self}`,
     'upgrade-insecure-requests',
   ].join('; ');
+}
+
+/** `https://host` → ` wss://host`, `http://host` → ` ws://host wss://host`. */
+function websocketOrigins(origin: string): string {
+  try {
+    const url = new URL(origin);
+    if (url.protocol === 'https:') return ` wss://${url.host}`;
+    if (url.protocol === 'http:') return ` ws://${url.host} wss://${url.host}`;
+  } catch {
+    /* an unparseable SITE_URL simply contributes nothing */
+  }
+  return '';
 }
 
 export const securityHeaders = (): MiddlewareHandler<AppContext> => {

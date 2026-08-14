@@ -113,10 +113,17 @@ export function icon(name: string, className = 'ico'): RawHtml {
 
 function navLink(item: NavItem, active?: string): RawHtml {
   const isActive = active === item.key;
+  // The messages badge starts hidden and is filled in by the client poll — the
+  // count is per-user state, so rendering it server-side would make the page
+  // uncacheable for no benefit.
+  const badge =
+    item.key === 'messages'
+      ? raw('<span class="sidenav__badge is-hidden" data-messages-badge hidden></span>')
+      : '';
   return raw(html`<li>
     <a class="sidenav__link ${isActive ? 'is-active' : ''}" href="${item.href}"
        ${isActive ? raw('aria-current="page"') : ''}>
-      ${icon(item.icon)}<span>${item.label}</span>
+      ${icon(item.icon)}<span>${item.label}</span>${badge}
     </a>
   </li>`);
 }

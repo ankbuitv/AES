@@ -1195,6 +1195,17 @@ textarea {
 .mediagrid__item {
   display: block;
   margin: 0;
+  position: relative;
+  background: var(--bg-sunken);
+  /* A reserved box means a slow or failing image never collapses the card. */
+  min-height: 120px;
+}
+
+.mediagrid__link {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: zoom-in;
 }
 
 .mediagrid__item img {
@@ -1204,6 +1215,30 @@ textarea {
   object-fit: cover;
   display: block;
 }
+
+/* Label shown only when the tile's image failed to load, so the reader sees a
+   real placeholder instead of bare alt text. */
+.mediagrid__broken {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.mediagrid__item.is-broken .mediagrid__broken { display: flex; }
+.mediagrid__item.is-broken .mediagrid__link { cursor: default; }
+.mediagrid__item.is-broken img { visibility: hidden; }
+
+.avatar.is-broken img { display: none; }
 
 .linkcard {
   display: block;
@@ -1295,6 +1330,71 @@ textarea {
   gap: 0.5rem;
   align-items: center;
   justify-content: flex-end;
+}
+
+/* Collapsed "more options" disclosure. Pure CSS + <details>, so it also works
+   with JavaScript disabled. */
+.composer__more {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+
+.composer__more-summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.92rem;
+  border-radius: var(--radius);
+  user-select: none;
+}
+
+.composer__more-summary::-webkit-details-marker { display: none; }
+
+.composer__more-summary::before {
+  content: '+';
+  display: inline-grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--text-muted);
+  background: var(--bg);
+}
+
+.composer__more[open] > .composer__more-summary::before { content: '−'; }
+
+.composer__more-summary:hover,
+.composer__more-summary:focus-visible {
+  color: var(--accent, inherit);
+}
+
+.composer__more-label { font-weight: 600; }
+
+.composer__more-hint {
+  font-size: 0.82rem;
+  /* The hint is a reminder of what is inside; it can wrap away on narrow screens. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.composer__more-body {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0 0.75rem 0.75rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
+@media (max-width: 520px) {
+  .composer__more-hint { display: none; }
 }
 
 .composer__attachments {
@@ -2582,6 +2682,332 @@ body.is-reader .shell {
   grid-template-columns: minmax(0, 46rem);
   justify-content: center;
 }
+
+/* ---------------------------------------------------------------------------
+   Messenger
+   --------------------------------------------------------------------------- */
+
+.sidenav__badge {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.sidenav__badge.is-hidden {
+  display: none;
+}
+
+.messenger {
+  display: grid;
+  grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+  min-height: min(72vh, 40rem);
+}
+
+.messenger__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.messenger__listhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.messenger__listhead .pagehead__title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.messenger__new {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+
+.convolist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.convo__link {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: var(--radius);
+  color: inherit;
+}
+
+.convo__link:hover {
+  background: var(--bg-sunken);
+  text-decoration: none;
+}
+
+.convo.is-active .convo__link {
+  background: var(--accent-soft);
+}
+
+.convo__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.convo__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.convo__name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.convo__time {
+  font-size: 0.75rem;
+  flex: none;
+}
+
+.convo__preview {
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.convo--unread .convo__preview,
+.convo--unread .convo__name {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.convo__badge {
+  flex: none;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+.messenger__thread {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.messenger__thread--empty {
+  place-items: center;
+  align-content: center;
+  padding: 2rem;
+}
+
+.thread__head {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.thread__back {
+  display: none;
+}
+
+.thread__who {
+  display: grid;
+  min-width: 0;
+}
+
+.thread__name {
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread__handle {
+  font-size: 0.8rem;
+}
+
+.thread__status {
+  margin-left: auto;
+  font-size: 0.78rem;
+}
+
+.thread__scroll {
+  overflow-y: auto;
+  padding: 1rem 0.9rem 0.4rem;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+.thread__typing {
+  min-height: 1.2rem;
+  margin: 0.2rem 0 0.4rem;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.bubbles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.bubble {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  max-width: min(78%, 34rem);
+}
+
+.bubble--mine {
+  margin-left: auto;
+  flex-direction: row-reverse;
+}
+
+.bubble__body {
+  padding: 0.5rem 0.75rem;
+  border-radius: 1.1rem;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+
+.bubble--mine .bubble__body {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-inverse);
+}
+
+.bubble__text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.bubble__time {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.bubble--pending {
+  opacity: 0.6;
+}
+
+.bubble--failed .bubble__body {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.chatbox {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem 0.35rem;
+  border-top: 1px solid var(--border);
+}
+
+.chatbox__input {
+  flex: 1 1 auto;
+  min-height: 2.5rem;
+  max-height: 10rem;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 1.2rem;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  resize: none;
+}
+
+.chatbox__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.chatbox__send {
+  flex: none;
+  border-radius: 999px;
+}
+
+.chatbox__hint {
+  margin: 0;
+  padding: 0 0.9rem 0.7rem;
+  font-size: 0.72rem;
+}
+
+.loadmore--older {
+  display: flex;
+  justify-content: center;
+  padding-bottom: 0.6rem;
+}
+
+@media (max-width: 860px) {
+  .messenger {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* On a phone the two panes are separate screens, not columns. */
+  .messenger--thread .messenger__list {
+    display: none;
+  }
+
+  .messenger--thread .thread__back {
+    display: inline-flex;
+  }
+
+  .bubble {
+    max-width: 86%;
+  }
+}
+
 
 @media print {
   .topbar,

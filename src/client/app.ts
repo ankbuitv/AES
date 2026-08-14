@@ -972,6 +972,7 @@ function initForms(): void {
       ['[data-follow-form]', handleFollowForm],
       ['[data-auth-form]', submitAuthForm],
       ['[data-settings-form]', submitSettingsForm],
+      ['[data-new-conversation-form]', submitNewConversation],
     ];
 
     for (const [selector, handler] of handlers) {
@@ -1099,6 +1100,434 @@ function initLiveFeed(): void {
   void poll();
 }
 
+// ---------------------------------------------------------------------------
+// Direct messages
+// ---------------------------------------------------------------------------
+
+interface MessageLike {
+  id: string;
+  conversationId: string;
+  content: string;
+  createdAt: number;
+  mine: boolean;
+  sender: { id: string; username: string; displayName: string; avatarMediaId: string | null };
+}
+
+interface MessagesBoot {
+  conversationId: string | null;
+  latestCursor?: string | null;
+  socket?: boolean;
+}
+
+/** Server-rendered bubble, reproduced closely enough that the two interleave. */
+function renderBubble(message: MessageLike, pending = false): string {
+  const avatar = message.mine
+    ? ''
+    : message.sender.avatarMediaId
+      ? `<span class="avatar avatar--sm"><img src="/media/${encodeURIComponent(
+          message.sender.avatarMediaId,
+        )}?v=thumb" alt="" width="32" height="32" loading="lazy" decoding="async"></span>`
+      : `<span class="avatar avatar--sm"><span class="avatar__fallback" aria-hidden="true">${escapeHtml(
+          (message.sender.displayName || message.sender.username).slice(0, 2).toUpperCase(),
+        )}</span></span>`;
+
+  const body = escapeHtml(message.content).replace(/\r?\n/g, '<br>');
+  const stamp = new Date(message.createdAt * 1000);
+
+  return `<li class="bubble ${message.mine ? 'bubble--mine' : ''} ${
+    pending ? 'bubble--pending' : ''
+  }" data-message-id="${escapeHtml(message.id)}">
+    ${avatar}
+    <div class="bubble__body">
+      <div class="bubble__text">${body}</div>
+      <time class="bubble__time" datetime="${stamp.toISOString()}">${
+        pending ? 'Sending…' : stamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }</time>
+    </div>
+  </li>`;
+}
+
+async function refreshMessagesBadge(): Promise<void> {
+  if (!boot.user) return;
+  const badge = $<HTMLElement>('[data-messages-badge]');
+  if (!badge) return;
+  try {
+    const data = await api<{ count: number }>('/api/messages/unread-count');
+    const count = Number(data.count ?? 0);
+    badge.textContent = count > 9 ? '9+' : String(count);
+    badge.hidden = count === 0;
+    badge.classList.toggle('is-hidden', count === 0);
+  } catch {
+    /* best effort */
+  }
+}
+
+/** Reveal the "start a conversation" form and the inbox list interactions. */
+function initConversationList(): void {
+  const toggle = $<HTMLButtonElement>('[data-new-conversation]');
+  const form = $<HTMLFormElement>('[data-new-conversation-form]');
+  if (toggle && form) {
+    toggle.addEventListener('click', () => {
+      const open = form.hidden;
+      form.hidden = !open;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) form.querySelector<HTMLInputElement>('input[name="username"]')?.focus();
+    });
+  }
+}
+
+async function submitNewConversation(form: HTMLFormElement): Promise<void> {
+  showFormError(form, null);
+  busy(form, true);
+  try {
+    const data = await api<{ conversationId: string }>('/api/messages', {
+      method: 'POST',
+      body: formPayload(form),
+    });
+    location.href = `/messages/${encodeURIComponent(data.conversationId)}`;
+  } catch (error) {
+    showFormError(form, error instanceof Error ? error.message : 'Could not start the conversation.');
+    busy(form, false);
+  }
+}
+
+/**
+ * Live thread.
+ *
+ * Delivery is a WebSocket to the conversation's Durable Object, but nothing
+ * depends on it: sending is a normal HTTP POST, and a `?after=` poll runs
+ * whenever the socket is closed (or was never available, e.g. no DO binding),
+ * so an offline tab still catches up on focus.
+ */
+function initThread(): void {
+  const thread = $<HTMLElement>('[data-thread]');
+  if (!thread) return;
+
+  const conversationId = thread.dataset.conversation ?? '';
+  const list = $<HTMLElement>('[data-thread-messages]', thread);
+  const scroller = $<HTMLElement>('[data-thread-scroll]', thread);
+  const form = $<HTMLFormElement>('[data-message-form]', thread);
+  const input = form?.querySelector<HTMLTextAreaElement>('textarea[name="content"]') ?? null;
+  const typingLine = $<HTMLElement>('[data-thread-typing]', thread);
+  const status = $<HTMLElement>('[data-thread-status]', thread);
+  if (!conversationId || !list || !scroller) return;
+
+  const messagesBoot = (boot.messages ?? {}) as MessagesBoot;
+  const seen = new Set<string>($$<HTMLElement>('[data-message-id]', list).map((el) => el.dataset.messageId ?? ''));
+  let latestCursor: string | null = thread.dataset.latestCursor || messagesBoot.latestCursor || null;
+  let socket: WebSocket | null = null;
+  let reconnectAttempt = 0;
+  let reconnectTimer = 0;
+  let typingTimer = 0;
+  let lastTypingSent = 0;
+  let closedForGood = false;
+
+  const atBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
+  const toBottom = () => {
+    scroller.scrollTop = scroller.scrollHeight;
+  };
+
+  const setStatus = (text: string) => {
+    if (status) status.textContent = text;
+  };
+
+  const append = (message: MessageLike): boolean => {
+    if (seen.has(message.id)) return false;
+    // A message we just sent is already on screen as an optimistic bubble.
+    const optimistic = list.querySelector<HTMLElement>(`[data-pending-for="${CSS.escape(message.id)}"]`);
+    seen.add(message.id);
+    const stick = atBottom();
+    if (optimistic) {
+      optimistic.outerHTML = renderBubble(message);
+    } else {
+      list.insertAdjacentHTML('beforeend', renderBubble(message));
+    }
+    if (stick) toBottom();
+    return true;
+  };
+
+  const markRead = () => {
+    void api(`/api/messages/${encodeURIComponent(conversationId)}/read`, { method: 'POST' })
+      .then(() => refreshMessagesBadge())
+      .catch(() => undefined);
+  };
+
+  // --- catch-up poll --------------------------------------------------------
+
+  let polling = false;
+  const catchUp = async () => {
+    if (polling || !latestCursor) return;
+    polling = true;
+    try {
+      const data = await api<{ items: MessageLike[]; latestCursor: string | null }>(
+        `/api/messages/${encodeURIComponent(conversationId)}?after=${encodeURIComponent(latestCursor)}`,
+      );
+      let added = false;
+      for (const message of data.items) added = append(message) || added;
+      if (data.latestCursor) latestCursor = data.latestCursor;
+      if (added && !document.hidden) markRead();
+    } catch {
+      /* the next tick tries again */
+    } finally {
+      polling = false;
+    }
+  };
+
+  // --- socket ---------------------------------------------------------------
+
+  const connect = () => {
+    if (closedForGood || messagesBoot.socket === false) return;
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+
+    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${scheme}//${location.host}/api/community/conversations/${encodeURIComponent(
+      conversationId,
+    )}/socket`;
+
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch {
+      return;
+    }
+    socket = ws;
+
+    ws.addEventListener('open', () => {
+      reconnectAttempt = 0;
+      setStatus('');
+      // Anything that landed while the socket was down.
+      void catchUp();
+    });
+
+    ws.addEventListener('message', (event) => {
+      let frame: { type?: string; message?: MessageLike; username?: string; userId?: string };
+      try {
+        frame = JSON.parse(String(event.data));
+      } catch {
+        return;
+      }
+      switch (frame.type) {
+        case 'message': {
+          const message = frame.message;
+          if (!message || message.conversationId !== conversationId) return;
+          if (append(message) && !message.mine) {
+            if (document.hidden) void refreshMessagesBadge();
+            else markRead();
+          }
+          break;
+        }
+        case 'typing': {
+          if (!typingLine || frame.userId === boot.user?.id) return;
+          typingLine.textContent = `${frame.username ?? 'Someone'} is typing…`;
+          typingLine.hidden = false;
+          window.clearTimeout(typingTimer);
+          typingTimer = window.setTimeout(() => {
+            typingLine.hidden = true;
+          }, 3_000);
+          break;
+        }
+        case 'presence': {
+          break;
+        }
+        default:
+          break;
+      }
+    });
+
+    const retry = () => {
+      socket = null;
+      if (closedForGood) return;
+      reconnectAttempt += 1;
+      if (reconnectAttempt > 6) {
+        // Give up on the socket and let the poll carry the thread.
+        setStatus('Reconnecting…');
+        return;
+      }
+      const delay = Math.min(15_000, 500 * 2 ** reconnectAttempt);
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = window.setTimeout(connect, delay);
+    };
+
+    ws.addEventListener('close', retry);
+    ws.addEventListener('error', () => {
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+    });
+  };
+
+  // --- sending --------------------------------------------------------------
+
+  const send = async () => {
+    if (!form || !input) return;
+    const content = input.value.trim();
+    if (!content) return;
+
+    const clientId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimistic: MessageLike = {
+      id: clientId,
+      conversationId,
+      content,
+      createdAt: Math.floor(Date.now() / 1000),
+      mine: true,
+      sender: {
+        id: boot.user?.id ?? '',
+        username: boot.user?.username ?? '',
+        displayName: boot.user?.username ?? '',
+        avatarMediaId: null,
+      },
+    };
+    list.insertAdjacentHTML('beforeend', renderBubble(optimistic, true));
+    const node = list.lastElementChild as HTMLElement | null;
+    input.value = '';
+    input.style.height = '';
+    toBottom();
+
+    try {
+      const body = formPayload(form);
+      body.set('content', content);
+      body.set('clientId', clientId);
+      const data = await api<{ message: MessageLike }>(
+        `/api/messages/${encodeURIComponent(conversationId)}`,
+        { method: 'POST', body },
+      );
+      seen.add(data.message.id);
+      if (node) {
+        node.outerHTML = renderBubble(data.message);
+      }
+      // The catch-up pass advances `latestCursor` past this message; `seen`
+      // keeps it from being appended twice in the meantime.
+      void catchUp();
+    } catch (error) {
+      node?.classList.add('bubble--failed');
+      const time = node?.querySelector('.bubble__time');
+      if (time) time.textContent = 'Not sent';
+      // Put the text back so it is never silently lost.
+      if (input && !input.value) input.value = content;
+      toast(error instanceof Error ? error.message : 'Could not send the message.', 'error');
+    }
+  };
+
+  form?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void send();
+  });
+
+  input?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void send();
+    }
+  });
+
+  // Grow the composer with its content, up to a few lines.
+  input?.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(160, input.scrollHeight)}px`;
+
+    const now = Date.now();
+    if (socket?.readyState === WebSocket.OPEN && now - lastTypingSent > 2_000) {
+      lastTypingSent = now;
+      try {
+        socket.send(JSON.stringify({ type: 'typing' }));
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  // --- older history --------------------------------------------------------
+
+  document.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-thread-older]');
+    if (!button) return;
+    event.preventDefault();
+    const cursor = button.dataset.cursor;
+    if (!cursor) return;
+    const el = button as HTMLButtonElement;
+    el.disabled = true;
+
+    void api<{ items: MessageLike[]; nextCursor: string | null; hasMore: boolean }>(
+      `/api/messages/${encodeURIComponent(conversationId)}?before=${encodeURIComponent(cursor)}&limit=30`,
+    )
+      .then((page) => {
+        const before = scroller.scrollHeight;
+        const markup = page.items
+          .filter((message) => !seen.has(message.id))
+          .map((message) => {
+            seen.add(message.id);
+            return renderBubble(message);
+          })
+          .join('');
+        list.insertAdjacentHTML('afterbegin', markup);
+        // Keep the reading position pinned to the same message.
+        scroller.scrollTop += scroller.scrollHeight - before;
+        if (page.hasMore && page.nextCursor) {
+          el.dataset.cursor = page.nextCursor;
+          el.disabled = false;
+        } else {
+          el.closest('.loadmore')?.remove();
+        }
+      })
+      .catch((error) => {
+        el.disabled = false;
+        toast(error instanceof Error ? error.message : 'Could not load older messages.', 'error');
+      });
+  });
+
+  // --- lifecycle ------------------------------------------------------------
+
+  toBottom();
+  markRead();
+  connect();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    if (!socket || socket.readyState > WebSocket.OPEN) {
+      reconnectAttempt = 0;
+      connect();
+    }
+    void catchUp();
+  });
+
+  window.addEventListener('pagehide', () => {
+    closedForGood = true;
+    window.clearTimeout(reconnectTimer);
+    try {
+      socket?.close(1000, 'navigating');
+    } catch {
+      /* ignore */
+    }
+  });
+
+  // Safety net: covers a socket that is open but silently dead, and is the only
+  // delivery path when the Durable Object binding is absent.
+  window.setInterval(() => {
+    if (document.hidden) return;
+    if (socket?.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(JSON.stringify({ type: 'ping' }));
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    void catchUp();
+  }, 10_000);
+}
+
+function initMessages(): void {
+  if (!boot.user) return;
+  void refreshMessagesBadge();
+  window.setInterval(() => {
+    if (!document.hidden) void refreshMessagesBadge();
+  }, 60_000);
+  initConversationList();
+  initThread();
+}
+
 function init(): void {
   initTheme();
   initDelegatedClicks();
@@ -1110,7 +1539,9 @@ function init(): void {
   initInfiniteScroll();
   initComposerDraft();
   initReaderExtras();
+  initMedia();
   initCommunityActions();
+  initMessages();
 }
 
 function initInfiniteScroll(): void {
@@ -1203,12 +1634,43 @@ function initReaderExtras(): void {
     if (t?.closest('[data-reader-mode]')) {
       document.body.classList.toggle('is-reader');
     }
-    const imgLink = t?.closest<HTMLAnchorElement>('[data-lightbox]');
-    if (imgLink) {
-      event.preventDefault();
-      openLightbox(imgLink.href);
-    }
   });
+}
+
+/**
+ * Image viewing. Lives on its own (not inside the reader extras) because the
+ * feed, profiles and comments all render `[data-lightbox]` links — binding it
+ * only on post pages is why "click to enlarge" used to do nothing elsewhere.
+ */
+function initMedia(): void {
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    const imgLink = target?.closest<HTMLAnchorElement>('[data-lightbox]');
+    if (!imgLink) return;
+    // Let modified clicks (new tab/window, download) behave natively.
+    const mouse = event as MouseEvent;
+    if (mouse.metaKey || mouse.ctrlKey || mouse.shiftKey || mouse.altKey || mouse.button > 0) return;
+    // If the thumbnail itself failed to load there is nothing to enlarge —
+    // fall through to a plain navigation so the user still sees the reason.
+    const img = imgLink.querySelector('img');
+    if (img && img.dataset.failed === '1') return;
+    event.preventDefault();
+    openLightbox(imgLink.href);
+  });
+
+  // A broken tile is marked so CSS can show a labelled placeholder instead of
+  // collapsing to bare alt text.
+  document.addEventListener(
+    'error',
+    (event) => {
+      const img = event.target as HTMLImageElement | null;
+      if (!img || img.tagName !== 'IMG') return;
+      if (img.dataset.failed === '1') return;
+      img.dataset.failed = '1';
+      img.closest('.mediagrid__item, .avatar')?.classList.add('is-broken');
+    },
+    true,
+  );
 }
 
 function openLightbox(src: string): void {
@@ -1217,8 +1679,17 @@ function openLightbox(src: string): void {
   const box = document.createElement('div');
   box.className = 'lightbox';
   box.innerHTML = `<button type="button" class="lightbox__close" aria-label="Close">×</button><img src="${escapeHtml(src)}" alt="">`;
-  box.addEventListener('click', () => box.remove());
+  const close = () => {
+    box.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') close();
+  };
+  box.addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
   document.body.appendChild(box);
+  box.querySelector<HTMLButtonElement>('.lightbox__close')?.focus();
 }
 
 function initCommunityActions(): void {

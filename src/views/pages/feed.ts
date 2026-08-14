@@ -73,40 +73,58 @@ export function composer(csrfToken: string | null, categories: { slug: string; n
       <textarea id="composer-content" name="content" rows="3" required maxlength="40000"
                 placeholder="Share something with the community…" data-composer-content></textarea>
 
-      <div class="composer__row">
-        <label class="sr-only" for="composer-title">Title (optional)</label>
-        <input id="composer-title" name="title" type="text" maxlength="160" placeholder="Title (optional)">
+      <!--
+        Everything optional lives behind a <details> disclosure. It is plain
+        HTML, so it opens without JavaScript, and the browser keeps the fields
+        in the form whether or not the panel is expanded — nothing is lost on
+        submit.
+      -->
+      <details class="composer__more">
+        <summary class="composer__more-summary">
+          <span class="composer__more-label">More options</span>
+          <span class="composer__more-hint muted">Title, tags, category, visibility, schedule, poll</span>
+        </summary>
 
-        <label class="sr-only" for="composer-tags">Tags</label>
-        <input id="composer-tags" name="tags" type="text" maxlength="200" placeholder="tags, comma, separated">
-      </div>
+        <div class="composer__more-body">
+          <div class="composer__row">
+            <label class="sr-only" for="composer-title">Title (optional)</label>
+            <input id="composer-title" name="title" type="text" maxlength="160" placeholder="Title (optional)">
+
+            <label class="sr-only" for="composer-tags">Tags</label>
+            <input id="composer-tags" name="tags" type="text" maxlength="200" placeholder="tags, comma, separated">
+          </div>
+
+          <div class="composer__row">
+            <label class="sr-only" for="composer-category">Category</label>
+            <select id="composer-category" name="category">
+              <option value="">No category</option>
+              ${categories.map((cat) => raw(html`<option value="${cat.slug}">${cat.name}</option>`))}
+            </select>
+
+            <label class="sr-only" for="composer-visibility">Visibility</label>
+            <select id="composer-visibility" name="visibility">
+              <option value="public">Public</option>
+              <option value="followers">Followers</option>
+              <option value="private">Only me</option>
+            </select>
+
+            <label class="sr-only" for="composer-schedule">Schedule</label>
+            <input id="composer-schedule" name="scheduledAt" type="datetime-local">
+          </div>
+
+          <div class="field">
+            <label for="composer-poll">Poll options <span class="muted">(one per line)</span></label>
+            <textarea id="composer-poll" name="pollOptions" rows="3" maxlength="400" placeholder="Option A&#10;Option B"></textarea>
+          </div>
+        </div>
+      </details>
 
       <div class="composer__foot">
-        <label class="sr-only" for="composer-category">Category</label>
-        <select id="composer-category" name="category">
-          <option value="">No category</option>
-          ${categories.map((cat) => raw(html`<option value="${cat.slug}">${cat.name}</option>`))}
-        </select>
-
-        <label class="sr-only" for="composer-visibility">Visibility</label>
-        <select id="composer-visibility" name="visibility">
-          <option value="public">Public</option>
-          <option value="followers">Followers</option>
-          <option value="private">Only me</option>
-        </select>
-
         <label class="filebtn">
           <input type="file" name="image" accept="image/png,image/jpeg,image/webp,image/gif" data-composer-file>
           <span>Add image</span>
         </label>
-
-        <label class="sr-only" for="composer-schedule">Schedule</label>
-        <input id="composer-schedule" name="scheduledAt" type="datetime-local">
         <button class="btn btn--primary" type="submit">Post</button>
-      </div>
-      <div class="field">
-        <label for="composer-poll">Poll options <span class="muted">(one per line)</span></label>
-        <textarea id="composer-poll" name="pollOptions" rows="3" maxlength="400" placeholder="Option A&#10;Option B"></textarea>
       </div>
       <p class="composer__hint muted">Markdown supported. Images are uploaded to your library first, then attached.</p>
     </form>

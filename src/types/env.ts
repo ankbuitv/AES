@@ -16,6 +16,13 @@ export interface Bindings {
   MEDIA_BUCKET?: R2Bucket;
   /** Optional: background job fan-out. Falls back to the D1 `jobs` table. */
   JOBS?: Queue<unknown>;
+  /**
+   * Optional: one Durable Object per conversation, used purely to fan messages
+   * out over WebSockets. When the binding is absent (unit tests, or a Worker
+   * deployed without the migration) messaging degrades to polling and nothing
+   * else changes — D1 remains the source of truth either way.
+   */
+  CONVERSATIONS?: DurableObjectNamespace;
 
   // --- Non-secret vars ------------------------------------------------------
   ENVIRONMENT: 'development' | 'preview' | 'production';

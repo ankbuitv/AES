@@ -35,6 +35,9 @@ import { collectHealthReport } from '../src/services/health';
 import { recordStatusSnapshot } from '../src/services/statusHistory';
 import { ensureSchema } from '../src/db/schema';
 import { randomToken } from '../src/utils/id';
+import { handleConversationSocket } from './socket';
+
+export { ConversationRoom } from './durable/conversationRoom';
 
 const app = new Hono<AppContext>();
 
@@ -63,7 +66,17 @@ app.route('/', staticPages);
 app.route('/', pages);
 
 export default {
-  fetch: app.fetch,
+  /**
+   * The WebSocket upgrade is answered before Hono sees the request: Hono
+   * re-wraps responses and would strip the `webSocket` property off the 101.
+   * `handleConversationSocket` returns null for every other request, so the
+   * normal pipeline is untouched.
+   */
+  async fetch(request: Request, env: Bindings, ctx: WorkerContext): Promise<Response> {
+    const upgraded = await handleConversationSocket(request, env);
+    if (upgraded) return upgraded;
+    return app.fetch(request, env, ctx as ExecutionContext);
+  },
 
   /**
    * Cron Triggers. The schedule string selects the frequent or nightly task

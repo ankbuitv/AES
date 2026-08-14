@@ -226,6 +226,70 @@ describe('serving', () => {
     expect(response.status).toBe(404);
   });
 
+  it('answers an <img> request with placeholder artwork instead of an error page', async () => {
+    const client = new TestClient();
+    const response = await client.raw('/media/med_missing0000000', {
+      headers: { accept: 'image/avif,image/webp,*/*', 'sec-fetch-dest': 'image' },
+    });
+
+    // The status still tells the truth; only the body is renderable.
+    expect(response.status).toBe(404);
+    expect(response.headers.get('content-type')).toContain('image/svg+xml');
+    expect(response.headers.get('x-media-placeholder')).toBe('missing');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const body = await response.text();
+    expect(body).toContain('<svg');
+    expect(body).not.toContain('<script');
+  });
+
+  it('keeps the JSON envelope for non-image clients', async () => {
+    const client = new TestClient();
+    const response = await client.raw('/media/med_missing0000000', {
+      headers: { accept: 'application/json' },
+    });
+    expect(response.status).toBe(404);
+    expect(response.headers.get('content-type')).toContain('application/json');
+  });
+
+  it('serves a placeholder when storage is unreachable, so posts still render', async () => {
+    const client = await authed('degraded');
+    const upload = await client.upload<MediaPayload>('/api/media/upload', {
+      name: 'pixel.png',
+      type: 'image/png',
+      bytes: TINY_PNG,
+    });
+    const id = upload.body.data!.media.id;
+
+    client.env.storage.failNext = new Error('bucket unreachable');
+    const response = await client.raw(`/media/${id}`, {
+      headers: { accept: 'image/*', 'sec-fetch-dest': 'image' },
+    });
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get('content-type')).toContain('image/svg+xml');
+    expect(response.headers.get('x-media-placeholder')).toBe('unavailable');
+  });
+
+  it('serves a placeholder rather than a bare 403 for a private file', async () => {
+    const owner = await authed('secretive');
+    const upload = await owner.upload<MediaPayload>('/api/media/upload', {
+      name: 'pixel.png',
+      type: 'image/png',
+      bytes: TINY_PNG,
+    }, { visibility: 'private' });
+    const id = upload.body.data!.media.id;
+
+    const stranger = new TestClient();
+    Object.assign(stranger, { env: owner.env });
+    await stranger.register({ username: 'nosy' });
+
+    const response = await stranger.raw(`/media/${id}`, {
+      headers: { accept: 'image/*', 'sec-fetch-dest': 'image' },
+    });
+    expect(response.status).toBe(403);
+    expect(response.headers.get('x-media-placeholder')).toBe('private');
+  });
+
   it('marks a row missing when the object has vanished from the bucket', async () => {
     const client = await authed('vanisher');
     const upload = await client.upload<MediaPayload>('/api/media/upload', {
