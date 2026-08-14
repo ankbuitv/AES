@@ -11,7 +11,7 @@
  */
 
 import type { ServiceContext } from './context';
-import type { ConversationDTO, MessageDTO } from '../types/models';
+import type { ConversationDTO, MessageDTO, MessageKind } from '../types/models';
 import type {
   ConversationListRow,
   MessageRow,
@@ -21,6 +21,30 @@ import { AppError } from '../utils/errors';
 import { LIMITS } from '../config';
 import { assertNoControlChars } from '../validators/common';
 import { encodeCursor, type Cursor } from '../utils/cursor';
+import type { MessagePeer } from '../types/models';
+
+/** Readable stand-in when an attachment is sent without a caption. */
+const ATTACHMENT_FALLBACK: Record<MessageKind, string> = {
+  text: '',
+  image: 'Photo',
+  audio: 'Voice message',
+  sticker: 'Sticker',
+};
+
+/**
+ * Prepare a user-typed search term for a LIKE pattern.
+ *
+ * `%` and `_` are LIKE wildcards: left alone, typing `%` would match every
+ * conversation. They are escaped here (the queries declare ESCAPE '\\') so the
+ * term can only ever match itself.
+ */
+function normalizeSearchTerm(value: string): string {
+  return (value ?? '')
+    .trim()
+    .toLowerCase()
+    .slice(0, 60)
+    .replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
 
 export interface ThreadPage {
   items: MessageDTO[];
@@ -34,7 +58,14 @@ export interface ThreadPage {
 export class MessageService {
   constructor(private readonly ctx: ServiceContext) {}
 
-  /** Trim, validate and clamp an outgoing message body. */
+  /**
+   * Trim, validate and clamp an outgoing message body.
+   *
+   * Emoji need no special handling: they are ordinary (multi-byte) characters,
+   * and the control-character check below deliberately targets the C0/C1 ranges
+   * only, so every pictograph, skin-tone modifier and ZWJ sequence survives
+   * intact.
+   */
   static sanitize(raw: string): string {
     // Keep newlines (they are meaningful in chat), drop other control chars.
     const text = raw.replace(/\r\n/g, '\n').replace(/[^\S\n]+$/gm, '').trim();
@@ -44,6 +75,17 @@ export class MessageService {
       throw AppError.badRequest(`Message must be at most ${LIMITS.messageContentMax} characters`);
     }
     return text;
+  }
+
+  /**
+   * Caption for an attachment bubble. Unlike `sanitize` an empty result is
+   * fine — the attachment *is* the message — so this never throws.
+   */
+  static sanitizeCaption(raw: string, fallback: string): string {
+    const text = (raw ?? '').replace(/\r\n/g, '\n').replace(/[^\S\n]+$/gm, '').trim();
+    if (!text) return fallback;
+    assertNoControlChars(text.replace(/\n/g, ' '), 'Message');
+    return text.slice(0, LIMITS.messageContentMax);
   }
 
   /** Open (or reuse) the 1:1 conversation with `username`. */
@@ -68,6 +110,36 @@ export class MessageService {
   async listConversations(viewerId: string, limit = 40): Promise<ConversationDTO[]> {
     const rows = await this.ctx.repos.messages.listConversations(viewerId, limit);
     return rows.map((row) => toConversationDTO(row, viewerId));
+  }
+
+  /**
+   * Incremental inbox search: as soon as the user types one character we return
+   * the conversations whose peer matches, plus a few people they have not
+   * messaged yet so "search then start a chat" is one flow rather than two.
+   */
+  async searchInbox(
+    viewerId: string,
+    rawTerm: string,
+  ): Promise<{ conversations: ConversationDTO[]; people: MessagePeer[] }> {
+    const term = normalizeSearchTerm(rawTerm);
+    if (!term) {
+      return { conversations: await this.listConversations(viewerId), people: [] };
+    }
+
+    const [rows, people] = await Promise.all([
+      this.ctx.repos.messages.searchConversations(viewerId, term, 25),
+      this.ctx.repos.messages.searchNewPeople(viewerId, term, 8),
+    ]);
+
+    return {
+      conversations: rows.map((row) => toConversationDTO(row, viewerId)),
+      people: people.map((person) => ({
+        id: person.id,
+        username: person.username,
+        displayName: person.display_name || person.username,
+        avatarMediaId: person.avatar_media_id,
+      })),
+    };
   }
 
   async peerOf(conversationId: string, viewerId: string) {
@@ -132,14 +204,26 @@ export class MessageService {
     conversationId: string;
     senderId: string;
     content: string;
+    kind?: MessageKind;
+    mediaId?: string | null;
+    durationMs?: number;
   }): Promise<MessageDTO> {
-    const content = MessageService.sanitize(options.content);
+    const kind: MessageKind = options.kind ?? 'text';
+    // Text bubbles must carry text; attachment bubbles fall back to a short
+    // label so previews and screen readers always have something to read.
+    const content =
+      kind === 'text'
+        ? MessageService.sanitize(options.content)
+        : MessageService.sanitizeCaption(options.content, ATTACHMENT_FALLBACK[kind]);
     await this.assertMember(options.conversationId, options.senderId);
 
     const { id } = await this.ctx.repos.messages.insert({
       conversationId: options.conversationId,
       senderId: options.senderId,
       content,
+      kind,
+      mediaId: options.mediaId ?? null,
+      durationMs: options.durationMs ?? 0,
     });
 
     const row = await this.ctx.repos.messages.findMessage(id);
@@ -197,10 +281,16 @@ export class MessageService {
  * sender id it already knows).
  */
 export function toMessageDTO(row: MessageRow, viewerId: string): MessageDTO {
+  const kind = (row.kind || 'text') as MessageKind;
   return {
     id: row.id,
     conversationId: row.conversation_id,
     content: row.content,
+    kind,
+    // Attachments are streamed through the Worker gateway like every other
+    // object; the bucket hostname never reaches the browser.
+    mediaUrl: row.media_id ? `/media/${encodeURIComponent(row.media_id)}` : null,
+    durationMs: Number(row.duration_ms ?? 0),
     createdAt: row.created_at,
     mine: row.sender_id === viewerId,
     sender: {

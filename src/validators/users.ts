@@ -64,6 +64,18 @@ export const resolveReportSchema = z.object({
   resolution: z.string().trim().max(500).optional().default(''),
 });
 
+/**
+ * Mark one or more notifications read.
+ *
+ * A form body (`ids=abc`) yields a bare string, while a repeated field
+ * (`ids=abc&ids=def`) and a JSON body both yield an array — the body parser
+ * deliberately preserves that distinction. Accepting either shape is what makes
+ * "mark this one read" work from the dropdown, from the full page and from a
+ * no-JavaScript form alike.
+ */
 export const notificationReadSchema = z.object({
-  ids: z.array(idSchema).min(1).max(100),
+  ids: z
+    .union([idSchema, z.array(idSchema)])
+    .transform((value) => (Array.isArray(value) ? value : [value]))
+    .refine((ids) => ids.length >= 1 && ids.length <= 100, 'Pass between 1 and 100 ids'),
 });

@@ -40,7 +40,8 @@ export type IdPrefix =
   | 'col'
   | 'cnv'
   | 'msg'
-  | 'psh';
+  | 'psh'
+  | 'rel';
 
 export function newId(prefix: IdPrefix): string {
   const ts = Date.now().toString(36).padStart(9, '0');

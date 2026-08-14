@@ -22,6 +22,12 @@ export const IMAGE_MIME_TYPES = new Set([
   'image/gif',
   'video/mp4',
   'video/webm',
+  // Voice messages. WebM/Opus is what MediaRecorder produces on Chromium and
+  // Firefox; MP4/AAC is Safari's equivalent.
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg',
+  'audio/mpeg',
 ]);
 
 const EXTENSION_BY_MIME: Record<string, string> = {
@@ -31,6 +37,10 @@ const EXTENSION_BY_MIME: Record<string, string> = {
   'image/gif': 'gif',
   'video/mp4': 'mp4',
   'video/webm': 'webm',
+  'audio/webm': 'weba',
+  'audio/mp4': 'm4a',
+  'audio/ogg': 'ogg',
+  'audio/mpeg': 'mp3',
 };
 
 /**
@@ -60,8 +70,19 @@ function startsWith(bytes: Uint8Array, signature: number[], offset = 0): boolean
   return true;
 }
 
-/** Detect a supported image type from magic bytes, or null. */
-export function sniffMime(bytes: Uint8Array): SniffResult | null {
+/**
+ * Detect a supported media type from magic bytes, or null.
+ *
+ * Two container formats — Matroska/WebM and ISO-BMFF (`ftyp`) — are used for
+ * both audio and video, so their magic bytes cannot distinguish the two on
+ * their own. For *those two cases only* the browser-declared type is consulted
+ * to choose between the audio and video labels of the same verified container.
+ * That is not a trust decision: whichever label wins, the bytes have already
+ * been proven to be that container, and both labels are on the allowlist.
+ */
+export function sniffMime(bytes: Uint8Array, declaredType = ''): SniffResult | null {
+  const declared = declaredType.split(';')[0]?.trim().toLowerCase() ?? '';
+  const declaredAudio = declared.startsWith('audio/');
   // JPEG: FF D8 FF
   if (startsWith(bytes, [0xff, 0xd8, 0xff])) {
     return { mime: 'image/jpeg', extension: 'jpg', ...readJpegSize(bytes) };
@@ -85,11 +106,31 @@ export function sniffMime(bytes: Uint8Array): SniffResult | null {
     return { mime: 'image/webp', extension: 'webp', ...readWebpSize(bytes) };
   }
 
+  // ISO base media container (MP4 / M4A): "....ftyp" at offset 4.
   if (startsWith(bytes, [0x66, 0x74, 0x79, 0x70], 4)) {
-    return { mime: 'video/mp4', extension: 'mp4' };
+    return declaredAudio
+      ? { mime: 'audio/mp4', extension: 'm4a' }
+      : { mime: 'video/mp4', extension: 'mp4' };
   }
+
+  // Matroska / WebM: EBML header.
   if (startsWith(bytes, [0x1a, 0x45, 0xdf, 0xa3])) {
-    return { mime: 'video/webm', extension: 'webm' };
+    return declaredAudio
+      ? { mime: 'audio/webm', extension: 'weba' }
+      : { mime: 'video/webm', extension: 'webm' };
+  }
+
+  // Ogg: "OggS". Only ever used for audio here.
+  if (startsWith(bytes, [0x4f, 0x67, 0x67, 0x53])) {
+    return { mime: 'audio/ogg', extension: 'ogg' };
+  }
+
+  // MP3: an ID3 tag, or a raw MPEG frame sync (FF Ex/Fx).
+  if (startsWith(bytes, [0x49, 0x44, 0x33])) {
+    return { mime: 'audio/mpeg', extension: 'mp3' };
+  }
+  if (bytes.length > 1 && bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0) {
+    return { mime: 'audio/mpeg', extension: 'mp3' };
   }
 
   return null;
@@ -114,6 +155,15 @@ export function extensionForMime(mime: string): string {
 
 export function isAllowedImageMime(mime: string, allowlist: string[]): boolean {
   return IMAGE_MIME_TYPES.has(mime) && allowlist.includes(mime);
+}
+
+/**
+ * Two labels for one verified container (audio/webm vs video/webm) must not be
+ * treated as the "declared type disagrees with the bytes" attack signal.
+ */
+export function isSameContainer(declared: string, sniffed: string): boolean {
+  const strip = (value: string) => value.replace(/^(audio|video)\//, '');
+  return strip(declared) === strip(sniffed);
 }
 
 // --- dimension parsers ------------------------------------------------------

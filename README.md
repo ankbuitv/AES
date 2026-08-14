@@ -4,6 +4,8 @@ A complete, production-ready mini social platform that runs **entirely on Cloudf
 
 Posts (text, markdown, article, image, multi-image, link, code), threaded comments, reactions, follows, bookmarks, mentions, hashtags, notifications, full-text search, server-computed reputation, a moderation dashboard with an audit trail, and server-side rendering for every public page.
 
+Plus **Reels** (short vertical video, self-hosted or embedded from YouTube Shorts / TikTok / Instagram / Facebook), **rich direct messages** (emoji, photos, voice notes, stickers, live inbox search) and a **notification dropdown** that pages ten at a time.
+
 | Layer | Technology |
 | --- | --- |
 | Runtime | Cloudflare Workers (edge, V8 isolates) |
@@ -317,6 +319,20 @@ POST   /api/media/upload     GET /api/media     DELETE /api/media/:id
 GET    /media/{media_id}[?v=thumb|medium]      streaming gateway (Range, ETag)
 
 GET    /api/notifications[/unread-count]     POST /api/notifications/{read,read-all}
+       ?limit=10&cursor=  — the header dropdown pages ten at a time, capped at twenty
+DELETE /api/notifications/:id
+
+GET    /api/messages[?q=]                    inbox; `q` searches peers and suggests new people
+GET    /api/messages/unread-count            POST /api/messages  (open a conversation)
+GET    /api/messages/:id[?before=|after=]    POST /api/messages/:id            (text)
+POST   /api/messages/:id/attachment          photo, voice note or sticker (multipart)
+POST   /api/messages/:id/read
+
+GET    /api/reels?sort=latest|popular&provider=&cursor=&limit=
+GET    /api/reels/:id
+POST   /api/reels/import                     paste a Shorts/TikTok/Instagram/Facebook link
+POST   /api/reels                            publish a video from your own media library
+POST   /api/reels/:id/like                   DELETE /api/reels/:id
 GET    /api/search?q=&type=all|posts|users|tags
 GET    /api/tags | /api/categories           POST /api/reports
 GET    /api/admin/{dashboard,reports,users,posts,audit}   POST /api/admin/actions
@@ -324,7 +340,7 @@ GET    /api/admin/{dashboard,reports,users,posts,audit}   POST /api/admin/action
 GET    /health   /robots.txt   /sitemap.xml   /feed.xml
 ```
 
-Pages: `/`, `/explore`, `/trending`, `/following`, `/bookmarks`, `/post/{slug}`, `/u/{username}[/media|/replies|/followers|/following]`, `/tag/{slug}`, `/category/{slug}`, `/search`, `/notifications`, `/settings`, `/compose`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/leaderboard`, `/admin`, `/about`, `/status`, `/terms`, `/privacy`.
+Pages: `/`, `/explore`, `/trending`, `/reels`, `/following`, `/bookmarks`, `/messages[/{id}]`, `/post/{slug}`, `/u/{username}[/media|/replies|/followers|/following]`, `/tag/{slug}`, `/category/{slug}`, `/search`, `/notifications`, `/settings`, `/compose`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/leaderboard`, `/admin`, `/about`, `/status`, `/terms`, `/privacy`.
 
 ## Database and migrations
 
@@ -338,6 +354,8 @@ Pages: `/`, `/explore`, `/trending`, `/following`, `/bookmarks`, `/post/{slug}`,
 | `0006_notifications` | notifications, jobs, stats_daily |
 | `0007_moderation` | reports, audit_logs, blocks |
 | `0008_search` | FTS5 `posts_fts` + sync triggers |
+| `0009_community` | polls, quotes, mutes, tag follows, collections, conversations, messages, push |
+| `0010_reels_messaging` | reels, reel_likes; `messages.kind/media_id/duration_ms` |
 
 Timestamps are unix seconds (INTEGER). IDs are prefixed and time-sortable (`usr_`, `pst_`, `cmt_`, `med_`…), which makes `(created_at, id)` cursors stable. Indexes are partial where the query is partial — the feed index only covers `status='published' AND visibility='public'`.
 
@@ -375,7 +393,7 @@ Cloudflare Queues are supported but commented out in `wrangler.toml`; the D1-bac
 ## Testing
 
 ```bash
-npm test          # 115 tests
+npm test          # 204 tests
 npm run check     # typecheck (3 projects) + tests
 ```
 
@@ -390,6 +408,10 @@ Tests drive the **real Worker** — `worker/index.ts`, the real middleware chain
 | `pages.test.ts` | SSR markup and landmarks, OpenGraph/JSON-LD/canonical, caching posture, robots/sitemap/RSS, admin authorisation and audit logging |
 | `jobs.test.ts` | job claim/retry/backoff, both cron schedules through `scheduled()`, counter reconciliation, resilience when one task fails |
 | `status.test.ts` | daily uptime aggregation, outage/resolution transitions and 90-day KV retention |
+| `messages.test.ts` | conversation creation, membership boundaries, thread paging, `?after=` catch-up, read state |
+| `richMessages.test.ts` | emoji round-tripping, photo/voice/sticker bubbles, attachment privacy (recipient yes, outsider 403), inbox search including LIKE-wildcard escaping |
+| `reels.test.ts` | URL parsing for all four platforms and its rejections (`javascript:`, look-alike hosts, query smuggling), import dedupe, uploads, feed paging, likes, deletion, the `frame-src` allowlist |
+| `notificationPanel.test.ts` | ten-at-a-time paging behind the dropdown, resolved text/href, selective and bulk read marking, cross-user isolation |
 
 ## Known limitations and workarounds
 
@@ -403,7 +425,9 @@ These are platform constraints, stated explicitly with the production-compatible
 6. **No email delivery from Workers.** *Workaround:* password reset creates a real, hashed, 30-minute single-use token and returns `{requested, delivered:false}` identically for known and unknown addresses (no account enumeration). In non-production the token is echoed as `devToken` so the flow is testable; production omits it. Wiring MailChannels/Resend means implementing one function in `AuthService.requestPasswordReset`.
 7. **No argon2/bcrypt in the runtime.** Native modules and large WASM are impractical at the edge, and Cloudflare Workers caps portable PBKDF2 derivations at 100 000 iterations. *Workaround:* PBKDF2-HMAC-SHA256 at that Workers-compatible ceiling, a 10-character minimum password policy and tight authentication rate limits. The iteration count is stored in each hash so it can be raised and hashes upgraded on a future compatible runtime.
 8. **Backblaze B2 has no per-object ACL usable from a browser.** *Workaround:* the bucket is private and the Worker is the only reader — which is the desired design anyway, since it lets every read be permission-checked and keeps credentials server-side.
-9. **`wrangler dev` does not fire Cron Triggers automatically.** *Workaround:* trigger them with `curl "http://localhost:8787/cdn-cgi/local/scheduled?cron=..."`; `tests/jobs.test.ts` calls `scheduled()` directly.
+9. **Third-party short video cannot be re-hosted.** Downloading a TikTok, Instagram, Facebook or YouTube video and serving it ourselves would breach every one of those platforms' terms of use — and there is no public API that grants it. *Workaround:* `parseReelUrl` extracts the platform + video id from a pasted link and **rebuilds** that platform's official embed URL, so the video always streams from its own player and we store nothing but an id. Two consequences are visible in the UI: shortened share links (`vm.tiktok.com`, `fb.watch`) are refused because expanding them needs a network call the parser deliberately does not make, and only YouTube exposes a poster frame without an API key. Members who want a true self-hosted reel upload the file, which goes through the normal media pipeline.
+10. **Voice messages depend on `MediaRecorder`.** Codec support differs — Chromium and Firefox produce WebM/Opus, Safari MP4/AAC — and the API is absent in a few browsers. *Workaround:* the allowlist accepts all four common audio types, the sniffer resolves the audio/video ambiguity of the shared WebM and MP4 containers using the declared type *after* verifying the container bytes, and the microphone button simply does nothing where the API is missing; text, photos and stickers are unaffected.
+11. **`wrangler dev` does not fire Cron Triggers automatically.** *Workaround:* trigger them with `curl "http://localhost:8787/cdn-cgi/local/scheduled?cron=..."`; `tests/jobs.test.ts` calls `scheduled()` directly.
 
 ---
 

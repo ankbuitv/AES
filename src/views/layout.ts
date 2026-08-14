@@ -67,6 +67,7 @@ const NAV: readonly NavItem[] = [
   { key: 'home', href: '/', label: 'Home', icon: 'home', group: 'primary' },
   { key: 'explore', href: '/explore', label: 'Explore', icon: 'compass', group: 'primary' },
   { key: 'trending', href: '/trending', label: 'Trending', icon: 'flame', group: 'primary' },
+  { key: 'reels', href: '/reels', label: 'Reels', icon: 'play', group: 'primary' },
   { key: 'following', href: '/following', label: 'Following', icon: 'users', auth: true, group: 'primary' },
   { key: 'bookmarks', href: '/bookmarks', label: 'Bookmarks', icon: 'bookmark', auth: true, group: 'library' },
   { key: 'messages', href: '/messages', label: 'Messages', icon: 'comment', auth: true, group: 'library' },
@@ -78,7 +79,14 @@ const NAV: readonly NavItem[] = [
   { key: 'privacy', href: '/privacy', label: 'Privacy', icon: 'shield', group: 'legal' },
 ];
 
-const HEADER_NAV = NAV.filter((item) => ['home', 'explore', 'trending'].includes(item.key));
+const HEADER_NAV = NAV.filter((item) => ['home', 'explore', 'trending', 'reels'].includes(item.key));
+
+/**
+ * The bottom bar on phones. A deliberately different set from the desktop
+ * sidebar — five thumb-sized destinations rather than a shrunken copy of a
+ * twelve-item list.
+ */
+const MOBILE_NAV_KEYS = ['home', 'explore', 'reels', 'notifications', 'messages'] as const;
 
 /** Inline SVG sprite: no icon-font request, no external asset, no CSP hole. */
 const ICONS: Record<string, string> = {
@@ -102,6 +110,10 @@ const ICONS: Record<string, string> = {
   share: '<path d="M12 4v10"/><path d="m8 8 4-4 4 4"/><path d="M6 14v5h12v-5"/>',
   heart: '<path d="M12 20s-7-4.4-7-9.2A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.8C19 15.6 12 20 12 20z"/>',
   activity: '<path d="M3 12h4l2.3-6 4.1 12 2.2-6H21"/>',
+  play: '<rect x="3" y="4.5" width="18" height="15" rx="3.5"/><path d="M10.5 9.2 15 12l-4.5 2.8z" fill="currentColor" stroke="none"/>',
+  user: '<circle cx="12" cy="8.5" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  logout: '<path d="M14 5.5H6.5v13H14"/><path d="M17.5 12H11"/><path d="m15 9.2 2.8 2.8L15 14.8"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
 };
 
 export function icon(name: string, className = 'ico'): RawHtml {
@@ -244,23 +256,15 @@ export function renderLayout(input: LayoutInput): string {
             </a>
             ${user
               ? raw(html`
-                <a class="topnav__link" href="/notifications" aria-label="Notifications${unread ? ` (${unread} unread)` : ''}">
-                  ${icon('bell')}
-                  ${unread
-                    ? raw(html`<span class="badge-count" data-unread-badge>${unread > 99 ? '99+' : unread}</span>`)
-                    : raw('<span class="badge-count is-hidden" data-unread-badge hidden></span>')}
-                </a>
-                <a class="topnav__link" href="/settings" aria-label="Settings">${icon('settings')}</a>
-                <a class="avatar avatar--sm topnav__avatar" href="/u/${user.username}" aria-label="Your profile">
-                  ${avatarChip(user)}
-                </a>`)
+                ${notificationsMenu(unread)}
+                ${accountMenu(user)}`)
               : raw(html`
                 <a class="btn btn--ghost btn--small topnav__signin" href="/login">Sign in</a>
-                <a class="btn btn--primary btn--small" href="/register">Join</a>`)}
-            <button class="topnav__link theme-toggle" type="button" data-theme-toggle aria-label="Switch colour theme">
-              ${icon('sun', 'ico theme-toggle__sun')}
-              ${icon('moon', 'ico theme-toggle__moon')}
-            </button>
+                <a class="btn btn--primary btn--small" href="/register">Join</a>
+                <button class="topnav__link theme-toggle" type="button" data-theme-toggle aria-label="Switch colour theme">
+                  ${icon('sun', 'ico theme-toggle__sun')}
+                  ${icon('moon', 'ico theme-toggle__moon')}
+                </button>`)}
           </nav>`)}
     </div>
   </header>
@@ -302,6 +306,8 @@ export function renderLayout(input: LayoutInput): string {
             : raw(html`<a class="btn btn--primary btn--block sidenav__cta" href="/register">Join AES</a>`)}
         </nav>
 
+        ${mobileNav(user, input.active)}
+
         <main id="main" class="main" role="main" tabindex="-1">
           ${raw(input.body)}
         </main>
@@ -321,6 +327,123 @@ export function renderLayout(input: LayoutInput): string {
   <script nonce="${input.nonce}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script>
 </body>
 </html>`}`;
+}
+
+/**
+ * The phone bottom bar.
+ *
+ * Rendered as its own element rather than by restyling the desktop sidebar:
+ * a thumb-reachable bar wants five destinations and a prominent compose
+ * button, which is a different information architecture, not a narrower one.
+ */
+function mobileNav(user: AuthUser | null, active?: string): RawHtml {
+  const items = MOBILE_NAV_KEYS.map((key) => NAV.find((item) => item.key === key)).filter(
+    (item): item is NavItem => Boolean(item) && (!item!.auth || Boolean(user)),
+  );
+
+  return raw(html`
+    <nav class="mobilenav" aria-label="Primary (mobile)">
+      ${items.map((item) => {
+        const isActive = active === item.key;
+        const badge =
+          item.key === 'notifications'
+            ? raw('<span class="mobilenav__badge is-hidden" data-unread-badge hidden></span>')
+            : item.key === 'messages'
+              ? raw('<span class="mobilenav__badge is-hidden" data-messages-badge hidden></span>')
+              : '';
+        return raw(html`<a class="mobilenav__link ${isActive ? 'is-active' : ''}" href="${item.href}"
+             ${isActive ? raw('aria-current="page"') : ''}>
+          ${icon(item.icon, 'ico mobilenav__ico')}<span class="mobilenav__label">${item.label}</span>${badge}
+        </a>`);
+      })}
+      <a class="mobilenav__link mobilenav__link--cta" href="${user ? '/compose' : '/register'}"
+         aria-label="${user ? 'New post' : 'Join AES'}">
+        ${icon('plus', 'ico mobilenav__ico')}<span class="mobilenav__label">${user ? 'Post' : 'Join'}</span>
+      </a>
+    </nav>
+  `);
+}
+
+/**
+ * The bell, plus the panel that drops out of it.
+ *
+ * The panel is rendered empty and filled by the client on first open: its
+ * contents are per-user and change constantly, so shipping them inside every
+ * page would make every page uncacheable and mostly waste the bytes. Without
+ * JavaScript the bell is still a plain link to `/notifications`, which is why
+ * it is an `<a>` wrapped in the toggle rather than a bare `<button>`.
+ */
+function notificationsMenu(unread: number): RawHtml {
+  return raw(html`
+    <div class="popover" data-notif-menu>
+      <a class="topnav__link popover__trigger" href="/notifications" data-notif-toggle
+         aria-haspopup="dialog" aria-expanded="false"
+         aria-label="Notifications${unread ? ` (${unread} unread)` : ''}">
+        ${icon('bell')}
+        ${unread
+          ? raw(html`<span class="badge-count" data-unread-badge>${unread > 99 ? '99+' : unread}</span>`)
+          : raw('<span class="badge-count is-hidden" data-unread-badge hidden></span>')}
+      </a>
+
+      <div class="popover__panel notifpop" data-notif-panel role="dialog" aria-label="Notifications" hidden>
+        <header class="notifpop__head">
+          <span class="notifpop__title">Notifications</span>
+          <button class="linkbtn" type="button" data-notif-read-all>Mark all read</button>
+        </header>
+
+        <!-- Scrolling this list loads ten more at a time, up to twenty visible. -->
+        <div class="notifpop__scroll" data-notif-scroll>
+          <ul class="notifpop__list" data-notif-list></ul>
+          <p class="notifpop__state muted" data-notif-state>Loading…</p>
+        </div>
+
+        <footer class="notifpop__foot">
+          <a class="btn btn--ghost btn--block btn--small" href="/notifications">Show all</a>
+        </footer>
+      </div>
+    </div>
+  `);
+}
+
+/**
+ * Avatar menu. Settings and the theme switch moved in here so the header keeps
+ * three controls instead of five.
+ */
+function accountMenu(user: AuthUser): RawHtml {
+  const staff = user.role === 'admin' || user.role === 'moderator';
+  return raw(html`
+    <div class="popover" data-account-menu>
+      <button class="avatar avatar--sm topnav__avatar popover__trigger" type="button" data-account-toggle
+              aria-haspopup="menu" aria-expanded="false" aria-label="Your account">
+        ${avatarChip(user)}
+      </button>
+
+      <div class="popover__panel accountpop" data-account-panel role="menu" hidden>
+        <a class="accountpop__id" href="/u/${user.username}" role="menuitem">
+          <span class="accountpop__name">${user.displayName || user.username}</span>
+          <span class="accountpop__handle muted">@${user.username} · Lv ${user.level}</span>
+        </a>
+        <hr class="accountpop__rule">
+        <a class="accountpop__item" href="/u/${user.username}" role="menuitem">${icon('user')}<span>Profile</span></a>
+        <a class="accountpop__item" href="/bookmarks" role="menuitem">${icon('bookmark')}<span>Bookmarks</span></a>
+        <a class="accountpop__item" href="/settings" role="menuitem">${icon('settings')}<span>Settings</span></a>
+        ${staff
+          ? raw(html`<a class="accountpop__item" href="/admin" role="menuitem">${icon('shield')}<span>Moderation</span></a>`)
+          : ''}
+        <hr class="accountpop__rule">
+        <button class="accountpop__item" type="button" data-theme-toggle role="menuitem">
+          ${icon('sun', 'ico theme-toggle__sun')}
+          ${icon('moon', 'ico theme-toggle__moon')}
+          <span>Switch theme</span>
+        </button>
+        <form method="post" action="/api/auth/logout" data-logout-form role="none">
+          <button class="accountpop__item accountpop__item--danger" type="submit" role="menuitem">
+            ${icon('logout')}<span>Sign out</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  `);
 }
 
 /** Avatar image or initials chip for the current user. */

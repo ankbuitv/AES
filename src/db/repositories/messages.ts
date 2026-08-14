@@ -41,6 +41,10 @@ export interface MessageRow {
   conversation_id: string;
   sender_id: string;
   content: string;
+  /** 'text' | 'image' | 'audio' | 'sticker' — see migration 0010. */
+  kind: string;
+  media_id: string | null;
+  duration_ms: number;
   created_at: number;
   username: string;
   display_name: string;
@@ -55,7 +59,9 @@ export interface MemberRow {
   last_read_at: number | null;
 }
 
-const MESSAGE_COLUMNS = `m.id, m.conversation_id, m.sender_id, m.content, m.created_at,
+const MESSAGE_COLUMNS = `m.id, m.conversation_id, m.sender_id, m.content,
+       COALESCE(m.kind, 'text') AS kind, m.media_id,
+       COALESCE(m.duration_ms, 0) AS duration_ms, m.created_at,
        u.username, u.display_name, u.avatar_media_id`;
 
 export class MessageRepository {
@@ -169,6 +175,75 @@ export class MessageRepository {
   }
 
   /**
+   * Inbox search: the same row shape as `listConversations`, narrowed to the
+   * people whose display name or handle contains `term`.
+   *
+   * The term is passed as a bound parameter and only ever reaches SQL inside a
+   * LIKE pattern that we build here, so a value containing `%` or `_` can widen
+   * nothing — the caller escapes those before calling.
+   */
+  async searchConversations(userId: string, term: string, limit = 20): Promise<ConversationListRow[]> {
+    const pattern = `%${term}%`;
+    return this.db.all<ConversationListRow>(
+      `SELECT c.id,
+              c.updated_at,
+              u.id                AS peer_id,
+              u.username          AS peer_username,
+              u.display_name      AS peer_display_name,
+              u.avatar_media_id   AS peer_avatar_media_id,
+              u.role              AS peer_role,
+              (SELECT m.content    FROM messages m WHERE m.conversation_id = c.id
+                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_content,
+              (SELECT m.created_at FROM messages m WHERE m.conversation_id = c.id
+                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_created_at,
+              (SELECT m.sender_id  FROM messages m WHERE m.conversation_id = c.id
+                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_sender_id,
+              (SELECT COUNT(*) FROM messages m
+                WHERE m.conversation_id = c.id
+                  AND m.sender_id <> me.user_id
+                  AND m.created_at > COALESCE(me.last_read_at, 0)) AS unread_count
+       FROM conversation_members me
+       JOIN conversations c ON c.id = me.conversation_id
+       JOIN conversation_members other ON other.conversation_id = c.id AND other.user_id <> me.user_id
+       JOIN users u ON u.id = other.user_id
+       WHERE me.user_id = ?
+         AND (LOWER(u.display_name) LIKE ? ESCAPE '\\' OR LOWER(u.username) LIKE ? ESCAPE '\\')
+       ORDER BY c.updated_at DESC, c.id DESC
+       LIMIT ?`,
+      [userId, pattern, pattern, limit],
+    );
+  }
+
+  /**
+   * People the viewer could start a conversation with. Excludes themselves and
+   * anyone they already have a thread with, so search results never duplicate
+   * the inbox rows shown above them.
+   */
+  async searchNewPeople(
+    userId: string,
+    term: string,
+    limit = 8,
+  ): Promise<{ id: string; username: string; display_name: string; avatar_media_id: string | null }[]> {
+    const pattern = `%${term}%`;
+    return this.db.all(
+      `SELECT u.id, u.username, u.display_name, u.avatar_media_id
+       FROM users u
+       WHERE u.id <> ?
+         AND u.status = 'active'
+         AND (LOWER(u.display_name) LIKE ? ESCAPE '\\' OR LOWER(u.username) LIKE ? ESCAPE '\\')
+         AND NOT EXISTS (
+           SELECT 1 FROM conversation_members mine
+           JOIN conversation_members theirs
+             ON theirs.conversation_id = mine.conversation_id AND theirs.user_id = u.id
+           WHERE mine.user_id = ?
+         )
+       ORDER BY u.follower_count DESC, u.username ASC
+       LIMIT ?`,
+      [userId, pattern, pattern, userId, limit],
+    );
+  }
+
+  /**
    * Newest `limit + 1` messages (so the caller can tell whether older history
    * exists), optionally ending before a cursor. Returned newest-first; the
    * service reverses into reading order.
@@ -226,14 +301,26 @@ export class MessageRepository {
     conversationId: string;
     senderId: string;
     content: string;
+    kind?: string;
+    mediaId?: string | null;
+    durationMs?: number;
   }): Promise<{ id: string; createdAt: number }> {
     const id = newId('msg');
     const ts = now();
     await this.db.batch([
       {
-        sql: `INSERT INTO messages (id, conversation_id, sender_id, content, created_at)
-              VALUES (?, ?, ?, ?, ?)`,
-        params: [id, input.conversationId, input.senderId, input.content, ts],
+        sql: `INSERT INTO messages (id, conversation_id, sender_id, content, kind, media_id, duration_ms, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          id,
+          input.conversationId,
+          input.senderId,
+          input.content,
+          input.kind ?? 'text',
+          input.mediaId ?? null,
+          Math.max(0, Math.trunc(input.durationMs ?? 0)),
+          ts,
+        ],
       },
       {
         sql: 'UPDATE conversations SET updated_at = ? WHERE id = ?',

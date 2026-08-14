@@ -311,10 +311,22 @@ export interface NotificationDTO {
 
 export type MessagePeer = Pick<PublicUser, 'id' | 'username' | 'displayName' | 'avatarMediaId'>;
 
+/**
+ * What a bubble carries. `text` is the default and the only kind that existed
+ * before rich messages; the others always keep a readable `content` fallback so
+ * inbox previews, notifications and screen readers never render an empty line.
+ */
+export type MessageKind = 'text' | 'image' | 'audio' | 'sticker';
+
 export interface MessageDTO {
   id: string;
   conversationId: string;
   content: string;
+  kind: MessageKind;
+  /** Worker-served attachment URL for `image`/`audio` bubbles. */
+  mediaUrl: string | null;
+  /** Voice-clip length in milliseconds; 0 when unknown or not audio. */
+  durationMs: number;
   createdAt: number;
   /** True when the signed-in viewer wrote it — drives the bubble alignment. */
   mine: boolean;
@@ -327,6 +339,30 @@ export interface ConversationDTO {
   peer: MessagePeer & { role: UserRole };
   lastMessage: { content: string; createdAt: number; mine: boolean } | null;
   unreadCount: number;
+}
+
+/** A short vertical video: either self-hosted or an official third-party embed. */
+export interface ReelDTO {
+  id: string;
+  provider: 'upload' | 'youtube' | 'tiktok' | 'instagram' | 'facebook';
+  providerLabel: string;
+  externalId: string;
+  /** Canonical page on the source platform, for the "watch on …" link. */
+  sourceUrl: string;
+  /** iframe src for embedded reels; empty for uploads. */
+  embedUrl: string;
+  /** Worker-served video URL for uploads; empty for embeds. */
+  videoUrl: string;
+  posterUrl: string;
+  title: string;
+  caption: string;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  createdAt: number;
+  viewerLiked: boolean;
+  canDelete: boolean;
+  author: Pick<PublicUser, 'id' | 'username' | 'displayName' | 'avatarMediaId' | 'level'>;
 }
 
 export interface MediaDTO {
