@@ -107,7 +107,10 @@ export function createTestEnv(
     STORAGE_PROVIDER: 'r2',
     MAX_UPLOAD_BYTES: '1048576',
     MAX_JSON_BODY_BYTES: '262144',
-    ALLOWED_UPLOAD_MIME: 'image/jpeg,image/png,image/webp,image/gif',
+    // Mirrors the shipped default in wrangler.toml: images and short video for
+    // posts and reels, audio for voice messages.
+    ALLOWED_UPLOAD_MIME:
+      'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/webm,audio/mp4,audio/ogg,audio/mpeg',
     REGISTRATION_OPEN: 'true',
     LOG_LEVEL: 'error',
     SESSION_SECRET: 'test-session-secret-value-0123456789',

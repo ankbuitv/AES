@@ -28,6 +28,7 @@ import search, { categories, tags } from './search';
 import admin, { reports } from './admin';
 import extras from './extras';
 import messages from './messages';
+import reels from './reels';
 
 const api = new Hono<AppContext>();
 
@@ -53,6 +54,7 @@ api.route('/reports', reports);
 api.route('/admin', admin);
 api.route('/community', extras);
 api.route('/messages', messages);
+api.route('/reels', reels);
 
 /**
  * Small discovery document. Useful for smoke-testing a fresh deployment
@@ -78,6 +80,7 @@ api.get('/', (c) => {
       '/api/admin',
       '/api/community',
       '/api/messages',
+      '/api/reels',
     ],
   });
 });

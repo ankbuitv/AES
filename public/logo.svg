@@ -5,12 +5,24 @@
       <stop offset="0" stop-color="#4F46E5"/>
       <stop offset="1" stop-color="#7C3AED"/>
     </linearGradient>
+    <linearGradient id="aes-logo-fur" x1="11" y1="9" x2="29" y2="33" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DCD8FF"/>
+    </linearGradient>
   </defs>
+
   <rect x="0" y="0" width="40" height="40" rx="9" fill="url(#aes-logo-bg)"/>
-  <path d="M11.6 29.1 20 10.3 28.4 29.1" fill="none" stroke="#fff" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M15.1 22.4h9.8" fill="none" stroke="#fff" stroke-width="2.9" stroke-linecap="round"/>
-  <circle cx="20" cy="10.3" r="1.85" fill="#C7D2FE"/>
-  <circle cx="11.6" cy="29.1" r="1.85" fill="#C7D2FE"/>
-  <circle cx="28.4" cy="29.1" r="1.85" fill="#C7D2FE"/>
+
+  <path d="M10 9.7 15.3 15.9 11.9 21.2 8.4 15z" fill="url(#aes-logo-fur)"/>
+  <path d="M30 9.7 24.7 15.9 28.1 21.2 31.6 15z" fill="url(#aes-logo-fur)"/>
+  <path d="M10.9 12.3 13.7 15.8 12.1 18.2 10.3 14.8z" fill="#6D5CF0"/>
+  <path d="M29.1 12.3 26.3 15.8 27.9 18.2 29.7 14.8z" fill="#6D5CF0"/>
+
+  <path d="M20 12.8 29.4 19c0 6.6-4.2 11.6-9.4 12.8C14.8 30.6 10.6 25.6 10.6 19z" fill="url(#aes-logo-fur)"/>
+  <path d="M14.8 21h10.4" stroke="#6D5CF0" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <circle cx="16.4" cy="24.1" r="1.55" fill="#2B2170"/>
+  <circle cx="23.6" cy="24.1" r="1.55" fill="#2B2170"/>
+  <path d="M20 27.6c1.2 0 1.9.6 1.9 1.3 0 .9-.9 1.6-1.9 1.6s-1.9-.7-1.9-1.6c0-.7.7-1.3 1.9-1.3z" fill="#2B2170"/>
+
   <text x="50" y="28" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="22" font-weight="750" letter-spacing="-0.04em" fill="currentColor">AES</text>
 </svg>

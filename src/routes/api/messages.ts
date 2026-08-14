@@ -20,9 +20,13 @@ import { json } from '../../utils/response';
 import { parseOrThrow } from '../../validators/common';
 import {
   conversationIdSchema,
+  inboxSearchSchema,
+  sendAttachmentSchema,
   sendMessageSchema,
   startConversationSchema,
 } from '../../validators/messages';
+import { MediaService } from '../../services/media';
+import { AppError } from '../../utils/errors';
 import { decodeCursor, parseLimit } from '../../utils/cursor';
 
 const messages = new Hono<AppContext>();
@@ -32,12 +36,25 @@ messages.use('*', requireAuth(), async (c, next) => {
   await next();
 });
 
-/** Inbox: one row per conversation, newest activity first. */
+/**
+ * Inbox: one row per conversation, newest activity first.
+ *
+ * With `?q=` this becomes the incremental search the conversation list uses on
+ * every keystroke: matching conversations first, then a few people the viewer
+ * has not messaged yet so a search can turn straight into a new chat.
+ */
 messages.get('/', async (c) => {
   const viewer = requireUser(c.get('user'));
   const service = new MessageService(serviceContext(c));
+  const { q } = parseOrThrow(inboxSearchSchema, { q: c.req.query('q') ?? '' });
+
+  if (q.trim()) {
+    const result = await service.searchInbox(viewer.id, q);
+    return json(c, { items: result.conversations, people: result.people, query: q });
+  }
+
   const items = await service.listConversations(viewer.id);
-  return json(c, { items });
+  return json(c, { items, people: [] });
 });
 
 /** Badge count for the nav, polled alongside notifications. */
@@ -121,6 +138,67 @@ messages.post('/:id', rateLimit('sendMessage'), async (c) => {
     conversationId,
     senderId: viewer.id,
     content: input.content,
+  });
+
+  const peer = await service.peerOf(conversationId, viewer.id);
+  if (peer) notifyPeer(ctx, peer.user_id, viewer, conversationId, message.content);
+
+  return json(c, { message, ...(input.clientId ? { clientId: input.clientId } : {}) }, 201);
+});
+
+/**
+ * Send a photo, a voice clip or a sticker.
+ *
+ * Photos and voice notes arrive as multipart in the *same* request that creates
+ * the bubble: the file goes through the normal media pipeline first (magic-byte
+ * sniffing, quota, per-hour cap) and only a stored media id is ever written to
+ * the message row. A caller may also pass an existing `mediaId` they own —
+ * ownership is re-checked here, so a guessed id cannot be attached to a chat.
+ */
+messages.post('/:id/attachment', rateLimit('sendMessage'), async (c) => {
+  const viewer = requireUser(c.get('user'));
+  const conversationId = parseOrThrow(conversationIdSchema, c.req.param('id'));
+  const body = await readBody(c);
+  const input = parseOrThrow(sendAttachmentSchema, body.fields);
+
+  const ctx = serviceContext(c);
+  const service = new MessageService(ctx);
+  // Membership before any upload: a stranger must not be able to spend our
+  // storage budget on a conversation they cannot read.
+  await service.assertMember(conversationId, viewer.id);
+
+  let mediaId: string | null = null;
+  if (input.kind !== 'sticker') {
+    const file = body.files?.file ?? body.files?.audio ?? body.files?.image;
+    if (file) {
+      const media = await new MediaService(ctx).upload({
+        owner: viewer,
+        file,
+        declaredType: file.type,
+        filename: file.name,
+        usage: 'attachment',
+        // Chat attachments are as private as the conversation itself.
+        visibility: 'private',
+      });
+      mediaId = media.id;
+    } else if (input.mediaId) {
+      const existing = await ctx.repos.media.findById(input.mediaId);
+      if (!existing || existing.owner_id !== viewer.id) {
+        throw AppError.badRequest('That attachment is not available');
+      }
+      mediaId = existing.id;
+    } else {
+      throw AppError.badRequest('Attach a file');
+    }
+  }
+
+  const message = await service.send({
+    conversationId,
+    senderId: viewer.id,
+    content: input.content ?? '',
+    kind: input.kind,
+    mediaId,
+    durationMs: input.durationMs,
   });
 
   const peer = await service.peerOf(conversationId, viewer.id);

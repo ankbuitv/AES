@@ -16,6 +16,7 @@
 
 import type { MiddlewareHandler } from 'hono';
 import type { AppContext } from '../types/env';
+import { EMBED_ORIGINS } from '../services/reelSources';
 
 /**
  * Build the CSP. `style-src` allows inline styles because the SSR layer emits
@@ -29,13 +30,21 @@ export function contentSecurityPolicy(nonce: string, origin: string): string {
   // so the scheme twins of the origin are listed explicitly rather than
   // allowing a blanket `wss:`.
   const socketOrigins = websocketOrigins(origin);
+  // Reels play inside the source platform's own iframe. `frame-src` is an
+  // explicit allowlist of those players and nothing else — an injected iframe
+  // pointing anywhere else is still blocked. `img-src` gains the same hosts so
+  // YouTube poster frames load; both lists come from one constant in
+  // `reelSources.ts` so adding a provider cannot leave the CSP behind.
+  const embeds = EMBED_ORIGINS.join(' ');
   return [
     `default-src ${self}`,
     `base-uri ${self}`,
     `script-src ${self} 'nonce-${nonce}'`,
     `style-src ${self} 'unsafe-inline'`,
-    `img-src ${self} data: blob:`,
-    `media-src ${self}`,
+    `img-src ${self} data: blob: https://i.ytimg.com`,
+    // blob: covers the local preview of a voice clip before it is uploaded.
+    `media-src ${self} blob:`,
+    `frame-src ${embeds}`,
     `font-src ${self} data:`,
     `connect-src ${self} ${origin}${socketOrigins}`,
     `form-action ${self}`,

@@ -889,17 +889,23 @@ function initStatusDashboard(): void {
 // Notifications badge
 // ---------------------------------------------------------------------------
 
+/** Paint one count onto every badge bound to it (header bell + mobile bar). */
+function paintBadges(selector: string, count: number, cap = 99): void {
+  const label = count > cap ? `${cap}+` : String(count);
+  for (const badge of $$<HTMLElement>(selector)) {
+    badge.textContent = label;
+    badge.hidden = count === 0;
+    badge.classList.toggle('is-hidden', count === 0);
+  }
+}
+
 async function refreshUnreadBadge(): Promise<void> {
   if (!boot.user) return;
-  const badge = $<HTMLElement>('[data-unread-badge]');
-  if (!badge) return;
+  if (!$('[data-unread-badge]')) return;
 
   try {
     const data = await api<{ count: number }>('/api/notifications/unread-count');
-    const count = Number(data.count ?? 0);
-    badge.textContent = count > 99 ? '99+' : String(count);
-    badge.hidden = count === 0;
-    badge.classList.toggle('is-hidden', count === 0);
+    paintBadges('[data-unread-badge]', Number(data.count ?? 0));
   } catch {
     /* a failed badge refresh is never worth bothering the user about */
   }
@@ -1032,6 +1038,255 @@ function initNotifications(): void {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Popovers: the notification panel and the account menu
+// ---------------------------------------------------------------------------
+
+interface NotificationLike {
+  id: string;
+  text: string;
+  href: string;
+  createdAt: number;
+  readAt: number | null;
+  type: string;
+  actor: { username: string; displayName: string; avatarMediaId: string | null } | null;
+}
+
+const NOTIF_ICONS: Record<string, string> = {
+  FOLLOW: '\u{1F464}',
+  LIKE: '\u2764\uFE0F',
+  COMMENT: '\u{1F4AC}',
+  REPLY: '\u21A9\uFE0F',
+  MENTION: '@',
+  SYSTEM: '\u{1F514}',
+  MODERATION: '\u{1F6E1}\uFE0F',
+};
+
+/** "3m", "5h", "2d" — the panel is narrow, so the stamp has to be too. */
+function shortAgo(seconds: number): string {
+  const delta = Math.max(0, Math.floor(Date.now() / 1000) - seconds);
+  if (delta < 60) return 'now';
+  if (delta < 3_600) return `${Math.floor(delta / 60)}m`;
+  if (delta < 86_400) return `${Math.floor(delta / 3_600)}h`;
+  if (delta < 604_800) return `${Math.floor(delta / 86_400)}d`;
+  return new Date(seconds * 1000).toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+
+/**
+ * One row of the panel.
+ *
+ * `text` and `href` are computed by the server (the same helpers the SSR page
+ * uses), and everything interpolated here is escaped — the API never hands the
+ * client pre-rendered markup for notifications.
+ */
+function renderNotifRow(item: NotificationLike): string {
+  const unread = !item.readAt;
+  const avatar = item.actor?.avatarMediaId
+    ? `<img class="notifpop__avatar" src="/media/${encodeURIComponent(
+        item.actor.avatarMediaId,
+      )}?v=thumb" alt="" width="32" height="32" loading="lazy" decoding="async">`
+    : `<span class="notifpop__icon" aria-hidden="true">${escapeHtml(
+        NOTIF_ICONS[item.type] ?? '\u{1F514}',
+      )}</span>`;
+
+  return `<li class="notifpop__item ${unread ? 'is-unread' : ''}" data-notif-item data-id="${escapeHtml(
+    item.id,
+  )}">
+    <a class="notifpop__link" href="${escapeHtml(item.href)}">
+      ${avatar}
+      <span class="notifpop__body">
+        <span class="notifpop__text">${escapeHtml(item.text)}</span>
+        <span class="notifpop__time muted">${escapeHtml(shortAgo(item.createdAt))}</span>
+      </span>
+    </a>
+    <button class="notifpop__mark" type="button" data-notif-mark="${escapeHtml(item.id)}"
+            title="${unread ? 'Mark as read' : 'Read'}"
+            aria-label="${unread ? 'Mark this notification as read' : 'Already read'}"
+            ${unread ? '' : 'disabled'}>\u2713</button>
+  </li>`;
+}
+
+/**
+ * The notification dropdown.
+ *
+ * Loads ten at a time and stops at twenty, which is the point of the panel: it
+ * is a glance, not an archive. "Show all" goes to the full page, where the
+ * existing cursor pagination takes over.
+ */
+function initNotificationPanel(): void {
+  const host = $<HTMLElement>('[data-notif-menu]');
+  if (!host || !boot.user) return;
+
+  const trigger = $<HTMLElement>('[data-notif-toggle]', host);
+  const panel = $<HTMLElement>('[data-notif-panel]', host);
+  const list = $<HTMLElement>('[data-notif-list]', host);
+  const scroller = $<HTMLElement>('[data-notif-scroll]', host);
+  const state = $<HTMLElement>('[data-notif-state]', host);
+  if (!trigger || !panel || !list || !scroller) return;
+
+  const PAGE_SIZE = 10;
+  const MAX_ITEMS = 20;
+  let cursor: string | null = null;
+  let loading = false;
+  let exhausted = false;
+  let loadedAny = false;
+
+  const setState = (text: string) => {
+    if (!state) return;
+    state.textContent = text;
+    state.hidden = !text;
+  };
+
+  const load = async () => {
+    if (loading || exhausted) return;
+    if (list.children.length >= MAX_ITEMS) return;
+    loading = true;
+    setState(loadedAny ? 'Loading more…' : 'Loading…');
+
+    try {
+      const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
+      if (cursor) query.set('cursor', cursor);
+      const page = await api<{ items: NotificationLike[]; nextCursor: string | null; hasMore: boolean }>(
+        `/api/notifications?${query.toString()}`,
+      );
+
+      // Never grow past the cap, even if the server returns a full page.
+      const room = MAX_ITEMS - list.children.length;
+      const items = page.items.slice(0, room);
+      list.insertAdjacentHTML('beforeend', items.map(renderNotifRow).join(''));
+
+      cursor = page.nextCursor;
+      loadedAny = true;
+      exhausted = !page.hasMore || !page.nextCursor;
+
+      if (!list.children.length) setState('Nothing here yet.');
+      else if (list.children.length >= MAX_ITEMS) setState('');
+      else setState(exhausted ? '' : 'Scroll for more');
+    } catch (error) {
+      setState(error instanceof Error ? error.message : 'Could not load notifications.');
+    } finally {
+      loading = false;
+    }
+  };
+
+  const markRead = async (ids: string[]) => {
+    if (!ids.length) return;
+    const body = new FormData();
+    for (const id of ids) body.append('ids', id);
+    await api('/api/notifications/read', { method: 'POST', body });
+    for (const id of ids) {
+      const row = list.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`);
+      row?.classList.remove('is-unread');
+      const button = row?.querySelector<HTMLButtonElement>('[data-notif-mark]');
+      if (button) button.disabled = true;
+    }
+    void refreshUnreadBadge();
+  };
+
+  const close = () => {
+    panel.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+  };
+
+  const open = () => {
+    // One panel at a time.
+    for (const other of $$<HTMLElement>('.popover__panel')) {
+      if (other !== panel) other.hidden = true;
+    }
+    panel.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    if (!loadedAny) void load();
+  };
+
+  trigger.addEventListener('click', (event) => {
+    // Without JavaScript this is a link to /notifications; with it, it toggles.
+    event.preventDefault();
+    if (panel.hidden) open();
+    else close();
+  });
+
+  // Each scroll to the bottom pulls the next ten.
+  scroller.addEventListener('scroll', () => {
+    if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 40) void load();
+  });
+
+  panel.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+
+    const mark = target?.closest<HTMLElement>('[data-notif-mark]');
+    if (mark) {
+      event.preventDefault();
+      const id = mark.dataset.notifMark;
+      if (id) void markRead([id]).catch(() => toast('Could not mark as read', 'error'));
+      return;
+    }
+
+    if (target?.closest('[data-notif-read-all]')) {
+      event.preventDefault();
+      void api('/api/notifications/read-all', { method: 'POST' })
+        .then(() => {
+          for (const row of $$<HTMLElement>('[data-notif-item]', list)) {
+            row.classList.remove('is-unread');
+            const button = row.querySelector<HTMLButtonElement>('[data-notif-mark]');
+            if (button) button.disabled = true;
+          }
+          void refreshUnreadBadge();
+        })
+        .catch(() => toast('Could not mark everything read', 'error'));
+      return;
+    }
+
+    // Following a notification implies reading it.
+    const link = target?.closest<HTMLElement>('.notifpop__link');
+    const row = link?.closest<HTMLElement>('[data-notif-item]');
+    if (row?.classList.contains('is-unread') && row.dataset.id) {
+      void markRead([row.dataset.id]).catch(() => undefined);
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!panel.hidden && !host.contains(event.target as Node)) close();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !panel.hidden) {
+      close();
+      trigger.focus();
+    }
+  });
+}
+
+/** The avatar menu: profile, bookmarks, settings, theme, sign out. */
+function initAccountMenu(): void {
+  const host = $<HTMLElement>('[data-account-menu]');
+  if (!host) return;
+  const trigger = $<HTMLElement>('[data-account-toggle]', host);
+  const panel = $<HTMLElement>('[data-account-panel]', host);
+  if (!trigger || !panel) return;
+
+  const close = () => {
+    panel.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+  };
+
+  trigger.addEventListener('click', (event) => {
+    event.preventDefault();
+    const opening = panel.hidden;
+    for (const other of $$<HTMLElement>('.popover__panel')) other.hidden = true;
+    panel.hidden = !opening;
+    trigger.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!panel.hidden && !host.contains(event.target as Node)) close();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !panel.hidden) {
+      close();
+      trigger.focus();
+    }
+  });
+}
+
 function newestSeen(feed: HTMLElement): number {
   const attr = Number(feed.dataset.newest ?? 0);
   if (attr > 0) return attr;
@@ -1108,6 +1363,9 @@ interface MessageLike {
   id: string;
   conversationId: string;
   content: string;
+  kind?: 'text' | 'image' | 'audio' | 'sticker';
+  mediaUrl?: string | null;
+  durationMs?: number;
   createdAt: number;
   mine: boolean;
   sender: { id: string; username: string; displayName: string; avatarMediaId: string | null };
@@ -1117,6 +1375,47 @@ interface MessagesBoot {
   conversationId: string | null;
   latestCursor?: string | null;
   socket?: boolean;
+}
+
+/** "0:07" from a millisecond duration — mirrors the server-side helper. */
+function clockDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** The inside of a bubble, which depends on what was sent. Mirrors the SSR. */
+function renderBubbleContent(message: MessageLike): string {
+  const text = escapeHtml(message.content).replace(/\r?\n/g, '<br>');
+
+  if (message.kind === 'sticker') {
+    return `<div class="bubble__sticker" role="img" aria-label="Sticker">${text}</div>`;
+  }
+
+  if (message.kind === 'image' && message.mediaUrl) {
+    const caption =
+      message.content && message.content !== 'Photo' ? `<div class="bubble__text">${text}</div>` : '';
+    return `<a class="bubble__photo" href="${escapeHtml(message.mediaUrl)}" data-lightbox>
+      <img src="${escapeHtml(message.mediaUrl)}" alt="${escapeHtml(
+        message.content,
+      )}" loading="lazy" decoding="async">
+    </a>${caption}`;
+  }
+
+  if (message.kind === 'audio' && message.mediaUrl) {
+    const caption =
+      message.content && message.content !== 'Voice message'
+        ? `<div class="bubble__text">${text}</div>`
+        : '';
+    const length = message.durationMs
+      ? `<span class="bubble__duration muted">${escapeHtml(clockDuration(message.durationMs))}</span>`
+      : '';
+    return `<div class="bubble__voice">
+      <audio class="bubble__audio" src="${escapeHtml(message.mediaUrl)}" controls preload="none"></audio>
+      ${length}
+    </div>${caption}`;
+  }
+
+  return `<div class="bubble__text">${text}</div>`;
 }
 
 /** Server-rendered bubble, reproduced closely enough that the two interleave. */
@@ -1131,15 +1430,14 @@ function renderBubble(message: MessageLike, pending = false): string {
           (message.sender.displayName || message.sender.username).slice(0, 2).toUpperCase(),
         )}</span></span>`;
 
-  const body = escapeHtml(message.content).replace(/\r?\n/g, '<br>');
   const stamp = new Date(message.createdAt * 1000);
 
   return `<li class="bubble ${message.mine ? 'bubble--mine' : ''} ${
-    pending ? 'bubble--pending' : ''
-  }" data-message-id="${escapeHtml(message.id)}">
+    message.kind === 'sticker' ? 'bubble--sticker' : ''
+  } ${pending ? 'bubble--pending' : ''}" data-message-id="${escapeHtml(message.id)}">
     ${avatar}
     <div class="bubble__body">
-      <div class="bubble__text">${body}</div>
+      ${renderBubbleContent(message)}
       <time class="bubble__time" datetime="${stamp.toISOString()}">${
         pending ? 'Sending…' : stamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }</time>
@@ -1149,17 +1447,164 @@ function renderBubble(message: MessageLike, pending = false): string {
 
 async function refreshMessagesBadge(): Promise<void> {
   if (!boot.user) return;
-  const badge = $<HTMLElement>('[data-messages-badge]');
-  if (!badge) return;
+  if (!$('[data-messages-badge]')) return;
   try {
     const data = await api<{ count: number }>('/api/messages/unread-count');
-    const count = Number(data.count ?? 0);
-    badge.textContent = count > 9 ? '9+' : String(count);
-    badge.hidden = count === 0;
-    badge.classList.toggle('is-hidden', count === 0);
+    paintBadges('[data-messages-badge]', Number(data.count ?? 0), 9);
   } catch {
     /* best effort */
   }
+}
+
+interface InboxPerson {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarMediaId: string | null;
+}
+
+interface InboxConversation {
+  id: string;
+  peer: InboxPerson;
+  lastMessage: { content: string; createdAt: number; mine: boolean } | null;
+  unreadCount: number;
+}
+
+function avatarMarkup(person: InboxPerson): string {
+  if (person.avatarMediaId) {
+    return `<span class="avatar avatar--md"><img src="/media/${encodeURIComponent(
+      person.avatarMediaId,
+    )}?v=thumb" alt="" width="40" height="40" loading="lazy" decoding="async"></span>`;
+  }
+  return `<span class="avatar avatar--md"><span class="avatar__fallback" aria-hidden="true">${escapeHtml(
+    (person.displayName || person.username).slice(0, 2).toUpperCase(),
+  )}</span></span>`;
+}
+
+/** One inbox row, matching the server-rendered markup. */
+function renderConversationRow(item: InboxConversation, activeId: string): string {
+  const last = item.lastMessage;
+  const preview = last ? `${last.mine ? 'You: ' : ''}${last.content}` : `@${item.peer.username}`;
+  return `<li class="convo ${item.id === activeId ? 'is-active' : ''} ${
+    item.unreadCount ? 'convo--unread' : ''
+  }" data-conversation-row="${escapeHtml(item.id)}">
+    <a class="convo__link" href="/messages/${encodeURIComponent(item.id)}">
+      ${avatarMarkup(item.peer)}
+      <span class="convo__body">
+        <span class="convo__top"><span class="convo__name">${escapeHtml(item.peer.displayName)}</span>
+          ${last ? `<span class="convo__time muted">${escapeHtml(shortAgo(last.createdAt))}</span>` : ''}
+        </span>
+        <span class="convo__preview muted">${escapeHtml(preview)}</span>
+      </span>
+      ${
+        item.unreadCount
+          ? `<span class="convo__badge" aria-label="${item.unreadCount} unread">${item.unreadCount}</span>`
+          : ''
+      }
+    </a>
+  </li>`;
+}
+
+/** A person the viewer has not messaged yet; submitting opens the chat. */
+function renderPersonRow(person: InboxPerson, token: string): string {
+  return `<li class="convo convo--new">
+    <form class="convo__link" method="post" action="/api/messages" data-open-conversation>
+      <input type="hidden" name="_csrf" value="${escapeHtml(token)}">
+      <input type="hidden" name="username" value="${escapeHtml(person.username)}">
+      ${avatarMarkup(person)}
+      <span class="convo__body">
+        <span class="convo__top"><span class="convo__name">${escapeHtml(person.displayName)}</span></span>
+        <span class="convo__preview muted">@${escapeHtml(person.username)}</span>
+      </span>
+      <button class="btn btn--small btn--ghost" type="submit">Message</button>
+    </form>
+  </li>`;
+}
+
+/**
+ * Live inbox search.
+ *
+ * Typing one character is enough: matching conversations are filtered locally
+ * for an instant response, and a debounced request to the server then replaces
+ * the list with the authoritative result — which also surfaces people the
+ * viewer has never messaged, who by definition are not in the local list.
+ */
+function initInboxSearch(): void {
+  const form = $<HTMLFormElement>('[data-inbox-search]');
+  const input = $<HTMLInputElement>('[data-inbox-query]');
+  const results = $<HTMLElement>('[data-inbox-results]');
+  if (!form || !input || !results) return;
+
+  const activeId = $<HTMLElement>('[data-thread]')?.dataset.conversation ?? '';
+  let timer = 0;
+  let sequence = 0;
+
+  /** Instant, offline narrowing of the rows already on screen. */
+  const filterLocally = (term: string) => {
+    const needle = term.trim().toLowerCase();
+    for (const row of $$<HTMLElement>('[data-conversation-row]', results)) {
+      const haystack = row.dataset.searchName ?? row.textContent?.toLowerCase() ?? '';
+      row.hidden = needle !== '' && !haystack.includes(needle);
+    }
+  };
+
+  const search = async (term: string) => {
+    const ticket = ++sequence;
+    try {
+      const data = await api<{ items: InboxConversation[]; people: InboxPerson[] }>(
+        `/api/messages?q=${encodeURIComponent(term)}`,
+      );
+      // A slower earlier request must never overwrite a newer result.
+      if (ticket !== sequence) return;
+
+      const token = csrfToken();
+      const conversations = data.items ?? [];
+      const people = data.people ?? [];
+
+      const parts: string[] = [];
+      if (conversations.length) {
+        parts.push(
+          `<ul class="convolist" data-conversation-list>${conversations
+            .map((item) => renderConversationRow(item, activeId))
+            .join('')}</ul>`,
+        );
+      } else if (term.trim()) {
+        parts.push(
+          `<p class="messenger__noresults muted">No conversation matches \u201C${escapeHtml(
+            term,
+          )}\u201D.</p>`,
+        );
+      }
+      if (people.length) {
+        parts.push(
+          `<p class="messenger__grouplabel muted">People you haven't messaged</p>
+           <ul class="convolist" data-people-list>${people
+             .map((person) => renderPersonRow(person, token))
+             .join('')}</ul>`,
+        );
+      }
+      if (!parts.length) {
+        parts.push('<p class="messenger__noresults muted">Nobody found. Try another name.</p>');
+      }
+      results.innerHTML = parts.join('');
+    } catch {
+      // Leave the locally filtered list in place — it is still useful.
+    }
+  };
+
+  input.addEventListener('input', () => {
+    const term = input.value;
+    filterLocally(term);
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => void search(term), 180);
+  });
+
+  // With JavaScript the search is live, so a full navigation is redundant.
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    window.clearTimeout(timer);
+    void search(input.value);
+  });
 }
 
 /** Reveal the "start a conversation" form and the inbox list interactions. */
@@ -1174,6 +1619,7 @@ function initConversationList(): void {
       if (open) form.querySelector<HTMLInputElement>('input[name="username"]')?.focus();
     });
   }
+  initInboxSearch();
 }
 
 async function submitNewConversation(form: HTMLFormElement): Promise<void> {
@@ -1410,6 +1856,266 @@ function initThread(): void {
     }
   };
 
+  // --- attachments: emoji, stickers, photos, voice ---------------------------
+
+  /**
+   * Post an attachment bubble. The optimistic placeholder is rendered from a
+   * local object URL so the photo or clip is visible instantly, then replaced
+   * by the server's copy — the same swap the text path already does.
+   */
+  const sendAttachment = async (options: {
+    kind: 'image' | 'audio' | 'sticker';
+    file?: File | Blob | null;
+    content?: string;
+    durationMs?: number;
+    previewUrl?: string | null;
+  }): Promise<void> => {
+    const clientId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimistic: MessageLike = {
+      id: clientId,
+      conversationId,
+      content: options.content ?? (options.kind === 'image' ? 'Photo' : 'Voice message'),
+      kind: options.kind,
+      mediaUrl: options.previewUrl ?? null,
+      durationMs: options.durationMs ?? 0,
+      createdAt: Math.floor(Date.now() / 1000),
+      mine: true,
+      sender: {
+        id: boot.user?.id ?? '',
+        username: boot.user?.username ?? '',
+        displayName: boot.user?.username ?? '',
+        avatarMediaId: null,
+      },
+    };
+    list.insertAdjacentHTML('beforeend', renderBubble(optimistic, true));
+    const node = list.lastElementChild as HTMLElement | null;
+    toBottom();
+
+    try {
+      const body = new FormData();
+      body.set('kind', options.kind);
+      body.set('content', options.content ?? '');
+      body.set('clientId', clientId);
+      if (options.durationMs) body.set('durationMs', String(options.durationMs));
+      if (options.file) {
+        // A Blob from MediaRecorder has no filename; give it one so the
+        // multipart part is a File the Worker can classify.
+        const name = options.kind === 'audio' ? 'voice-message' : 'photo';
+        body.set('file', options.file, options.file instanceof File ? options.file.name : name);
+      }
+
+      const data = await api<{ message: MessageLike }>(
+        `/api/messages/${encodeURIComponent(conversationId)}/attachment`,
+        { method: 'POST', body },
+      );
+      seen.add(data.message.id);
+      if (node) node.outerHTML = renderBubble(data.message);
+      void catchUp();
+    } catch (error) {
+      node?.classList.add('bubble--failed');
+      const time = node?.querySelector('.bubble__time');
+      if (time) time.textContent = 'Not sent';
+      toast(error instanceof Error ? error.message : 'Could not send the attachment.', 'error');
+    } finally {
+      // The preview URL has served its purpose either way.
+      if (options.previewUrl) window.setTimeout(() => URL.revokeObjectURL(options.previewUrl!), 30_000);
+    }
+  };
+
+  // Emoji picker. Emoji are plain characters, so inserting one is a text edit;
+  // stickers are a separate message kind that renders large and bubble-less.
+  const emojiPanel = $<HTMLElement>('[data-emoji-panel]', thread);
+  const emojiToggle = $<HTMLElement>('[data-emoji-toggle]', thread);
+  if (emojiPanel && emojiToggle) {
+    emojiToggle.addEventListener('click', () => {
+      const opening = emojiPanel.hidden;
+      emojiPanel.hidden = !opening;
+      emojiToggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    });
+
+    emojiPanel.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement | null;
+
+      const emoji = target?.closest<HTMLElement>('[data-emoji]')?.dataset.emoji;
+      if (emoji && input) {
+        // Insert at the caret rather than appending, so the picker can be used
+        // in the middle of a sentence.
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        input.value = `${input.value.slice(0, start)}${emoji}${input.value.slice(end)}`;
+        const caret = start + emoji.length;
+        input.setSelectionRange(caret, caret);
+        input.focus();
+        return;
+      }
+
+      const sticker = target?.closest<HTMLElement>('[data-sticker]')?.dataset.sticker;
+      if (sticker) {
+        emojiPanel.hidden = true;
+        emojiToggle.setAttribute('aria-expanded', 'false');
+        void sendAttachment({ kind: 'sticker', content: sticker });
+      }
+    });
+
+    document.addEventListener('click', (event) => {
+      if (emojiPanel.hidden) return;
+      const target = event.target as Node;
+      if (!emojiPanel.contains(target) && !emojiToggle.contains(target)) {
+        emojiPanel.hidden = true;
+        emojiToggle.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
+  // Photos: any caption already typed rides along with the image.
+  const photoInput = $<HTMLInputElement>('[data-photo-input]', thread);
+  photoInput?.addEventListener('change', () => {
+    const file = photoInput.files?.[0];
+    if (!file) return;
+    const caption = input?.value.trim() ?? '';
+    if (input) {
+      input.value = '';
+      input.style.height = '';
+    }
+    void sendAttachment({
+      kind: 'image',
+      file,
+      content: caption,
+      previewUrl: URL.createObjectURL(file),
+    });
+    // Allow re-selecting the same file straight afterwards.
+    photoInput.value = '';
+  });
+
+  // Voice notes. MediaRecorder is not universal, so the button is only wired
+  // when the API exists; the rest of the composer is unaffected either way.
+  const voiceToggle = $<HTMLElement>('[data-voice-toggle]', thread);
+  const voiceBar = $<HTMLElement>('[data-voice-bar]', thread);
+  if (voiceToggle && voiceBar) {
+    const timeLabel = $<HTMLElement>('[data-voice-time]', voiceBar);
+    const hint = $<HTMLElement>('[data-voice-hint]', voiceBar);
+    let recorder: MediaRecorder | null = null;
+    let chunks: Blob[] = [];
+    let stream: MediaStream | null = null;
+    let startedAt = 0;
+    let ticker = 0;
+    let recorded: { blob: Blob; durationMs: number } | null = null;
+
+    const stopTracks = () => {
+      stream?.getTracks().forEach((track) => track.stop());
+      stream = null;
+    };
+
+    const resetBar = () => {
+      window.clearInterval(ticker);
+      voiceBar.hidden = true;
+      voiceBar.classList.remove('is-recording', 'is-ready');
+      recorded = null;
+      chunks = [];
+      recorder = null;
+      stopTracks();
+      if (timeLabel) timeLabel.textContent = '0:00';
+      voiceToggle.setAttribute('aria-pressed', 'false');
+    };
+
+    const beginRecording = async () => {
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+        toast('This browser cannot record audio.', 'error');
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch {
+        // Almost always a denied permission prompt; say so rather than failing
+        // silently with a dead button.
+        toast('Microphone access was refused.', 'error');
+        return;
+      }
+
+      chunks = [];
+      recorder = new MediaRecorder(stream);
+      startedAt = Date.now();
+      recorder.addEventListener('dataavailable', (event) => {
+        if (event.data.size) chunks.push(event.data);
+      });
+      recorder.addEventListener('stop', () => {
+        const durationMs = Date.now() - startedAt;
+        stopTracks();
+        if (!chunks.length) {
+          resetBar();
+          return;
+        }
+        recorded = { blob: new Blob(chunks, { type: recorder?.mimeType || 'audio/webm' }), durationMs };
+        voiceBar.classList.remove('is-recording');
+        voiceBar.classList.add('is-ready');
+        if (hint) hint.textContent = 'Ready to send';
+      });
+      recorder.start();
+
+      voiceBar.hidden = false;
+      voiceBar.classList.add('is-recording');
+      voiceBar.classList.remove('is-ready');
+      voiceToggle.setAttribute('aria-pressed', 'true');
+      if (hint) hint.textContent = 'Recording…';
+
+      window.clearInterval(ticker);
+      ticker = window.setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        if (timeLabel) timeLabel.textContent = clockDuration(elapsed);
+        // Hard stop at five minutes — the server rejects anything longer.
+        if (elapsed >= 5 * 60 * 1000) recorder?.stop();
+      }, 200);
+    };
+
+    voiceToggle.addEventListener('click', () => {
+      if (recorder && recorder.state === 'recording') {
+        recorder.stop();
+        window.clearInterval(ticker);
+        return;
+      }
+      void beginRecording();
+    });
+
+    $<HTMLElement>('[data-voice-cancel]', voiceBar)?.addEventListener('click', () => {
+      if (recorder && recorder.state === 'recording') recorder.stop();
+      resetBar();
+    });
+
+    $<HTMLElement>('[data-voice-send]', voiceBar)?.addEventListener('click', () => {
+      if (recorder && recorder.state === 'recording') {
+        // Send implies stop; the clip is posted from the stop handler's data on
+        // the next tick, once the final chunk has arrived.
+        recorder.addEventListener(
+          'stop',
+          () => {
+            if (recorded) {
+              void sendAttachment({
+                kind: 'audio',
+                file: recorded.blob,
+                durationMs: recorded.durationMs,
+                previewUrl: URL.createObjectURL(recorded.blob),
+              });
+            }
+            resetBar();
+          },
+          { once: true },
+        );
+        recorder.stop();
+        window.clearInterval(ticker);
+        return;
+      }
+      if (recorded) {
+        void sendAttachment({
+          kind: 'audio',
+          file: recorded.blob,
+          durationMs: recorded.durationMs,
+          previewUrl: URL.createObjectURL(recorded.blob),
+        });
+      }
+      resetBar();
+    });
+  }
+
   form?.addEventListener('submit', (event) => {
     event.preventDefault();
     void send();
@@ -1528,6 +2234,283 @@ function initMessages(): void {
   initThread();
 }
 
+// ---------------------------------------------------------------------------
+// Reels
+// ---------------------------------------------------------------------------
+
+/**
+ * Reel behaviour.
+ *
+ * The page already works without this: each reel is a `<video controls>` or a
+ * platform iframe, and "load more" is an ordinary link. The upgrades here are
+ * the ones that make a vertical feed feel right — play the reel in view, pause
+ * the ones that are not, like without a reload, and append the next page in
+ * place. Embedded reels are left entirely alone: their playback belongs to the
+ * platform inside the iframe, which we cannot (and must not) script.
+ */
+function initReels(): void {
+  const feed = $<HTMLElement>('[data-reel-feed]');
+  if (!feed) return;
+
+  // Autoplay only what the reader is actually looking at, so a long feed does
+  // not decode a dozen videos at once.
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const video = entry.target as HTMLVideoElement;
+          if (entry.isIntersecting && entry.intersectionRatio > 0.6) {
+            video.play().catch(() => undefined);
+          } else {
+            video.pause();
+          }
+        }
+      },
+      { threshold: [0, 0.6, 1] },
+    );
+    for (const video of $$<HTMLVideoElement>('[data-reel-video]', feed)) observer.observe(video);
+
+    // Videos appended later need observing too.
+    const mutations = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of Array.from(record.addedNodes)) {
+          if (!(node instanceof HTMLElement)) continue;
+          for (const video of $$<HTMLVideoElement>('[data-reel-video]', node)) observer.observe(video);
+        }
+      }
+    });
+    mutations.observe(feed, { childList: true });
+  }
+
+  // Likes: optimistic, then corrected by the authoritative count.
+  document.addEventListener('submit', (event) => {
+    const form = event.target as HTMLFormElement | null;
+    if (!form?.matches('[data-reel-like]')) return;
+    event.preventDefault();
+
+    const card = form.closest<HTMLElement>('[data-reel-id]');
+    const reelId = card?.dataset.reelId;
+    const button = form.querySelector<HTMLButtonElement>('button');
+    const counter = form.querySelector<HTMLElement>('[data-reel-likes]');
+    if (!reelId || !button) return;
+
+    const wasOn = button.classList.contains('is-on');
+    button.classList.toggle('is-on', !wasOn);
+    button.setAttribute('aria-pressed', String(!wasOn));
+    if (counter) counter.textContent = String(Math.max(0, Number(counter.textContent ?? 0) + (wasOn ? -1 : 1)));
+
+    void api<{ liked: boolean; likeCount: number }>(`/api/reels/${encodeURIComponent(reelId)}/like`, {
+      method: 'POST',
+    })
+      .then((data) => {
+        button.classList.toggle('is-on', data.liked);
+        button.setAttribute('aria-pressed', String(data.liked));
+        if (counter) counter.textContent = String(data.likeCount);
+      })
+      .catch((error) => {
+        // Put the UI back exactly as it was.
+        button.classList.toggle('is-on', wasOn);
+        button.setAttribute('aria-pressed', String(wasOn));
+        if (counter) counter.textContent = String(Math.max(0, Number(counter.textContent ?? 0) + (wasOn ? 1 : -1)));
+        toast(error instanceof Error ? error.message : 'Could not save that like.', 'error');
+      });
+  });
+
+  // Append the next page rather than navigating away from the current reel.
+  document.addEventListener('click', (event) => {
+    const more = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-reel-more]');
+    if (!more) return;
+    const cursor = more.dataset.cursor;
+    if (!cursor) return;
+    event.preventDefault();
+
+    const sort = new URLSearchParams(location.search).get('sort') === 'popular' ? 'popular' : 'latest';
+    more.setAttribute('aria-busy', 'true');
+
+    void api<{ items: ReelLike[]; nextCursor: string | null; hasMore: boolean }>(
+      `/api/reels?sort=${sort}&cursor=${encodeURIComponent(cursor)}&limit=10`,
+    )
+      .then((page) => {
+        feed.insertAdjacentHTML('beforeend', page.items.map(renderReelCard).join(''));
+        if (page.hasMore && page.nextCursor) {
+          more.dataset.cursor = page.nextCursor;
+          more.removeAttribute('aria-busy');
+        } else {
+          more.closest('.loadmore')?.remove();
+        }
+      })
+      .catch((error) => {
+        more.removeAttribute('aria-busy');
+        toast(error instanceof Error ? error.message : 'Could not load more reels.', 'error');
+      });
+  });
+
+  initReelComposer();
+}
+
+interface ReelLike {
+  id: string;
+  provider: string;
+  providerLabel: string;
+  sourceUrl: string;
+  embedUrl: string;
+  videoUrl: string;
+  posterUrl: string;
+  title: string;
+  caption: string;
+  viewCount: number;
+  likeCount: number;
+  createdAt: number;
+  viewerLiked: boolean;
+  author: { id: string; username: string; displayName: string; avatarMediaId: string | null };
+}
+
+/** Client-side twin of the SSR reel card. Everything is escaped. */
+function renderReelCard(reel: ReelLike): string {
+  const token = csrfToken();
+  const stage =
+    reel.provider === 'upload' && reel.videoUrl
+      ? `<video class="reel__video" src="${escapeHtml(reel.videoUrl)}" playsinline loop muted controls
+           preload="none" data-reel-video></video>`
+      : reel.embedUrl
+        ? `<iframe class="reel__embed" src="${escapeHtml(reel.embedUrl)}" title="${escapeHtml(
+            reel.title || `${reel.providerLabel} video`,
+          )}" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"
+           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+           allowfullscreen></iframe>`
+        : '<div class="reel__missing muted">This video is no longer available.</div>';
+
+  const avatar = reel.author.avatarMediaId
+    ? `<span class="avatar avatar--sm"><img src="/media/${encodeURIComponent(
+        reel.author.avatarMediaId,
+      )}?v=thumb" alt="" width="32" height="32" loading="lazy" decoding="async"></span>`
+    : `<span class="avatar avatar--sm"><span class="avatar__fallback" aria-hidden="true">${escapeHtml(
+        (reel.author.displayName || reel.author.username).slice(0, 2).toUpperCase(),
+      )}</span></span>`;
+
+  const like = token
+    ? `<form method="post" action="/api/reels/${encodeURIComponent(reel.id)}/like" data-reel-like>
+         <input type="hidden" name="_csrf" value="${escapeHtml(token)}">
+         <button class="reel__action ${reel.viewerLiked ? 'is-on' : ''}" type="submit"
+                 aria-pressed="${reel.viewerLiked}" aria-label="Like this reel">
+           \u2665 <span data-reel-likes>${reel.likeCount}</span>
+         </button>
+       </form>`
+    : `<a class="reel__action" href="/login?next=/reels">\u2665 <span>${reel.likeCount}</span></a>`;
+
+  return `<article class="reel" data-reel data-reel-id="${escapeHtml(reel.id)}">
+    <div class="reel__stage">${stage}</div>
+    <div class="reel__meta">
+      <div class="reel__author">
+        ${avatar}
+        <div class="reel__who">
+          <a class="reel__name" href="/u/${encodeURIComponent(reel.author.username)}">${escapeHtml(
+            reel.author.displayName,
+          )}</a>
+          <span class="reel__handle muted">@${escapeHtml(reel.author.username)} \u00B7 ${escapeHtml(
+            shortAgo(reel.createdAt),
+          )}</span>
+        </div>
+        <span class="pill pill--source">${escapeHtml(reel.providerLabel)}</span>
+      </div>
+      ${reel.title ? `<h2 class="reel__title">${escapeHtml(reel.title)}</h2>` : ''}
+      ${reel.caption ? `<p class="reel__caption">${escapeHtml(reel.caption)}</p>` : ''}
+      <div class="reel__actions">
+        ${like}
+        <span class="reel__action reel__action--static">\u25B6 <span>${reel.viewCount}</span></span>
+        ${
+          reel.sourceUrl
+            ? `<a class="reel__action" href="${escapeHtml(
+                reel.sourceUrl,
+              )}" target="_blank" rel="noopener noreferrer nofollow">Watch on ${escapeHtml(
+                reel.providerLabel,
+              )}</a>`
+            : ''
+        }
+      </div>
+    </div>
+  </article>`;
+}
+
+/**
+ * Importing and uploading reels.
+ *
+ * An upload is two steps — the file goes through the normal media pipeline
+ * first, then the returned id is published as a reel — so reels reuse the
+ * upload gate (sniffing, quota, rate limit) instead of getting a second one.
+ */
+function initReelComposer(): void {
+  const importForm = $<HTMLFormElement>('[data-reel-import]');
+  importForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    showFormError(importForm, null);
+    busy(importForm, true);
+    void api('/api/reels/import', { method: 'POST', body: formPayload(importForm) })
+      .then(() => {
+        toast('Reel added');
+        location.reload();
+      })
+      .catch((error) => {
+        showFormError(importForm, error instanceof Error ? error.message : 'Could not import that link.');
+        busy(importForm, false);
+      });
+  });
+
+  const uploadForm = $<HTMLFormElement>('[data-reel-upload]');
+  uploadForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const file = uploadForm.querySelector<HTMLInputElement>('[data-reel-file]')?.files?.[0];
+    if (!file) {
+      showFormError(uploadForm, 'Choose a video first.');
+      return;
+    }
+    showFormError(uploadForm, null);
+    busy(uploadForm, true);
+
+    const upload = new FormData();
+    upload.set('file', file, file.name);
+    upload.set('usage', 'post');
+
+    void api<{ media: { id: string } }>('/api/media/upload', { method: 'POST', body: upload })
+      .then((data) => {
+        const publish = new FormData();
+        publish.set('mediaId', data.media.id);
+        const caption = uploadForm.querySelector<HTMLInputElement>('input[name="caption"]')?.value ?? '';
+        if (caption) publish.set('caption', caption);
+        return api('/api/reels', { method: 'POST', body: publish });
+      })
+      .then(() => {
+        toast('Reel published');
+        location.reload();
+      })
+      .catch((error) => {
+        showFormError(uploadForm, error instanceof Error ? error.message : 'Could not publish that video.');
+        busy(uploadForm, false);
+      });
+  });
+}
+
+/**
+ * "Message this person" rows in inbox search: post the form, then land in the
+ * conversation it just opened.
+ */
+function initOpenConversation(): void {
+  document.addEventListener('submit', (event) => {
+    const form = event.target as HTMLFormElement | null;
+    if (!form?.matches('[data-open-conversation]')) return;
+    event.preventDefault();
+    busy(form, true);
+    void api<{ conversationId: string }>('/api/messages', { method: 'POST', body: formPayload(form) })
+      .then((data) => {
+        location.href = `/messages/${encodeURIComponent(data.conversationId)}`;
+      })
+      .catch((error) => {
+        busy(form, false);
+        toast(error instanceof Error ? error.message : 'Could not open that conversation.', 'error');
+      });
+  });
+}
+
 function init(): void {
   initTheme();
   initDelegatedClicks();
@@ -1542,6 +2525,10 @@ function init(): void {
   initMedia();
   initCommunityActions();
   initMessages();
+  initNotificationPanel();
+  initAccountMenu();
+  initReels();
+  initOpenConversation();
 }
 
 function initInfiniteScroll(): void {
@@ -1556,6 +2543,16 @@ function initInfiniteScroll(): void {
 function initComposerDraft(): void {
   const field = $<HTMLTextAreaElement>('[data-composer-content]');
   if (!field) return;
+
+  // Grow the compact composer with its content, up to a sensible ceiling.
+  if (field.hasAttribute('data-autogrow')) {
+    const grow = () => {
+      field.style.height = 'auto';
+      field.style.height = `${Math.min(224, Math.max(42, field.scrollHeight))}px`;
+    };
+    field.addEventListener('input', grow);
+    grow();
+  }
   const key = 'aes-draft';
   try {
     const saved = localStorage.getItem(key);

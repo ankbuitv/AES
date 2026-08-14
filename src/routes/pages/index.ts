@@ -45,6 +45,8 @@ import { renderNotificationsPage } from '../../views/pages/notifications';
 import { renderSearchPage, type SearchTab } from '../../views/pages/search';
 import { renderComposePage } from '../../views/pages/compose';
 import { renderConversationPage, renderMessagesPage } from '../../views/pages/messages';
+import { renderReelsPage } from '../../views/pages/reels';
+import { ReelService } from '../../services/reels';
 import { renderAdminPage, type AdminTab } from '../../views/pages/admin';
 import { defaultRail } from './rail';
 import type { FeedSort } from '../../db/repositories/posts';
@@ -563,6 +565,40 @@ pages.get('/search', rateLimit('search'), async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Reels — short vertical video, public like the feed
+// ---------------------------------------------------------------------------
+
+pages.get('/reels', readLimit(), async (c) => {
+  const viewer = c.get('user');
+  const sort = c.req.query('sort') === 'popular' ? 'popular' : 'latest';
+
+  const page = await new ReelService(serviceContext(c)).feed({
+    sort,
+    viewerId: viewer?.id ?? null,
+    cursor: cursorOf(c),
+    limit: limitOf(c, 10),
+  });
+
+  return renderPage(c, {
+    meta: {
+      title: 'Reels',
+      description: 'Short vertical video from the AES community and from across the web.',
+      canonical: absoluteUrl(c, '/reels'),
+    },
+    body: renderReelsPage({
+      page,
+      sort,
+      csrfToken: c.get('csrfToken') ?? null,
+      signedIn: Boolean(viewer),
+    }),
+    active: 'reels',
+    // Anonymous visitors get a short shared cache; signed-in responses embed
+    // per-viewer like state and `renderPage` forces `no-store` for them.
+    ...(viewer ? {} : { cacheSeconds: 30 }),
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Authenticated surfaces
 // ---------------------------------------------------------------------------
 
@@ -646,11 +682,21 @@ pages.get('/topics', requireAuth(), readLimit(), async (c) => {
 pages.get('/messages', requireAuth(), async (c) => {
   const viewer = requireUser(c.get('user'));
   const service = new MessageService(serviceContext(c));
-  const conversations = await service.listConversations(viewer.id);
+  // `?q=` makes the no-JS search work: the same filter the client applies on
+  // every keystroke is available as a plain form submission.
+  const query = (c.req.query('q') ?? '').slice(0, 60);
+  const result = query.trim()
+    ? await service.searchInbox(viewer.id, query)
+    : { conversations: await service.listConversations(viewer.id), people: [] };
 
   return renderPage(c, {
     meta: { title: 'Messages', noindex: true },
-    body: renderMessagesPage({ conversations, csrfToken: c.get('csrfToken') ?? null }),
+    body: renderMessagesPage({
+      conversations: result.conversations,
+      people: result.people,
+      query,
+      csrfToken: c.get('csrfToken') ?? null,
+    }),
     active: 'messages',
     bootstrap: { messages: { conversationId: null } },
   });
@@ -689,6 +735,8 @@ pages.get('/messages/:id', requireAuth(), async (c) => {
     },
     body: renderConversationPage({
       conversations,
+      people: [],
+      query: '',
       csrfToken: c.get('csrfToken') ?? null,
       active: {
         id,

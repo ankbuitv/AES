@@ -70,8 +70,15 @@ export function composer(csrfToken: string | null, categories: { slug: string; n
       <input type="hidden" name="_csrf" value="${csrfToken}">
       <input type="hidden" name="contentType" value="markdown">
       <label class="sr-only" for="composer-content">What's on your mind?</label>
-      <textarea id="composer-content" name="content" rows="3" required maxlength="40000"
-                placeholder="Share something with the community…" data-composer-content></textarea>
+      <!--
+        Starts at one line and grows with what is typed (the client upgrades it;
+        without JavaScript the browser's own scrollbar takes over). A composer
+        that opens three lines tall pushes the first post below the fold for
+        everyone, including the majority who only ever write one sentence.
+      -->
+      <textarea id="composer-content" name="content" rows="1" required maxlength="40000"
+                placeholder="Share something with the community…" data-composer-content
+                data-autogrow></textarea>
 
       <!--
         Everything optional lives behind a <details> disclosure. It is plain
@@ -126,7 +133,7 @@ export function composer(csrfToken: string | null, categories: { slug: string; n
         </label>
         <button class="btn btn--primary" type="submit">Post</button>
       </div>
-      <p class="composer__hint muted">Markdown supported. Images are uploaded to your library first, then attached.</p>
+      <p class="composer__hint composer__hint--quiet muted">Markdown supported. Images are uploaded to your library first, then attached.</p>
     </form>
   `;
 }

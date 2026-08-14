@@ -24,6 +24,7 @@ import {
   detectDangerous,
   extensionForMime,
   isAllowedImageMime,
+  isSameContainer,
   sanitizeFilename,
   sniffMime,
 } from '../utils/mime';
@@ -87,12 +88,15 @@ export class MediaService {
     // 2/3. Content-based classification. Order matters: reject hostile
     //      payloads before trying to interpret them as an image.
     const dangerous = detectDangerous(bytes);
-    const sniffed = sniffMime(bytes);
+    // The declared type is a hint, never a decision: it is only consulted to
+    // pick between the audio and video labels of a container the bytes have
+    // already proven (WebM and MP4 carry both).
+    const sniffed = sniffMime(bytes, input.declaredType ?? '');
     if (!sniffed) {
       throw AppError.unsupportedMedia(
         dangerous
           ? `Files of type "${dangerous}" are not allowed`
-          : 'Only JPEG, PNG, WebP, GIF, MP4 and WebM can be uploaded',
+          : 'Only JPEG, PNG, WebP, GIF, MP4, WebM and common audio formats can be uploaded',
       );
     }
     if (dangerous && dangerous !== 'markup') {
@@ -104,7 +108,12 @@ export class MediaService {
 
     // A declared type that disagrees with the bytes is a strong attack signal.
     const declared = (input.declaredType || '').split(';')[0]?.trim().toLowerCase() ?? '';
-    if (declared && declared !== 'application/octet-stream' && declared !== sniffed.mime) {
+    if (
+      declared &&
+      declared !== 'application/octet-stream' &&
+      declared !== sniffed.mime &&
+      !isSameContainer(declared, sniffed.mime)
+    ) {
       throw AppError.unsupportedMedia('The file content does not match its declared type');
     }
 
@@ -195,7 +204,12 @@ export class MediaService {
     const isStaff = viewer?.role === 'admin' || viewer?.role === 'moderator';
 
     if (original.visibility === 'private' && !isOwner && !isStaff) {
-      throw AppError.forbidden('This file is private');
+      // One exception: a photo or voice clip sent in a direct message is
+      // private to the *conversation*, not to the uploader. The check below is
+      // a membership join against the message that carries this attachment, so
+      // it grants access to exactly the people who can already read the bubble.
+      const shared = viewer ? await this.isChatAttachmentFor(original.id, viewer.id) : false;
+      if (!shared) throw AppError.forbidden('This file is private');
     }
     if (original.visibility === 'followers' && !isOwner && !isStaff) {
       if (!viewer) throw AppError.unauthenticated('Sign in to view this file');
@@ -209,6 +223,30 @@ export class MediaService {
     // correctness beats a 404 while the variant job is pending.
     const derived = await this.ctx.repos.media.findVariant(original.id, variant);
     return derived && derived.status === 'ready' ? derived : original;
+  }
+
+  /**
+   * True when `mediaId` is attached to a message in a conversation `viewerId`
+   * belongs to. Both the attachment row and its parent (a thumbnail derived
+   * from it) are accepted, so `?v=thumb` resolves for the recipient too.
+   */
+  private async isChatAttachmentFor(mediaId: string, viewerId: string): Promise<boolean> {
+    try {
+      const row = await this.ctx.repos.db.first(
+        `SELECT 1 AS x
+         FROM messages m
+         JOIN conversation_members cm
+           ON cm.conversation_id = m.conversation_id AND cm.user_id = ?
+         WHERE m.media_id = ?
+         LIMIT 1`,
+        [viewerId, mediaId],
+      );
+      return row !== null;
+    } catch {
+      // A database that predates the rich-message migration simply has no
+      // chat attachments to authorise.
+      return false;
+    }
   }
 
   /** Stream the object with correct caching, range and integrity headers. */
